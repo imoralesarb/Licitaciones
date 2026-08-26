@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Buscador de Licitaciones PLACSP - Servidor FastAPI + Frontend HTML moderno
-Adaptado para despliegue en Vercel y entornos de nube.
-"""
-
 import os
 import time
 import zipfile
@@ -17,15 +11,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 import uvicorn
-
 app = FastAPI(title="Buscador de Licitaciones PLACSP", version="2.0")
-
 DATA_DIR = "/tmp/licitaciones_data"
 os.makedirs(DATA_DIR, exist_ok=True)
-
 CACHE_DB = os.path.join(DATA_DIR, "licitaciones_db.pkl")
 CACHE_EMB = os.path.join(DATA_DIR, "licitaciones_embeddings.npy")
-
 NS = {
     'atom': 'http://www.w3.org/2005/Atom',
     'cbc-place-ext': 'urn:dgpe:names:draft:codice:schema:xsd:ContractFolderStatusMessage-2-ext',
