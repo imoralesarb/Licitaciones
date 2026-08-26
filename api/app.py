@@ -1,45 +1,4 @@
 
-Gemini
-Nueva conversación
-Buscar conversaciones
-Estudiantes
-Imágenes
-Biblioteca
-Nuevo cuaderno
-Migración de Buscador a la Nube
-Guía de Instalación Local con Docker
-Desplegar Notebook en Streamlit
-Automatizar WordPress con Docker Compose
-Google Colab en suspensión
-Entendiendo Namespaces XML en Python
-Notificación Sonora Fin Ejecución Colab
-Evitar que la Pantalla se Apague
-Explicar diapositivas sobre LLMs
-LLM para Configuración de Solucionadores MILP
-Analizando estado del arte: datos y aplicaciones
-Mejorar Correo de Avances TFM
-Spanish to English Translation
-Seleccionar Columnas en DataFrames
-Cold-Start en Sistemas de Recomendación
-Qiskit Unitary Simulator Error
-Traducción de Descripciones de Empresas
-Reglas de Asociación Evolutivas en Python
-Solucionar disco lleno en Ubuntu
-Identificación de Outliers con IQR
-Sistema RAG para Recomendación
-Comparación de Strings y Normalización de Texto
-Actualizar Firefox para Netflix en Linux
-Tesauros vs. Ontologías: Diferencias Clave
-Redes Dispersas: Densidad y Conexiones
-Símbolos de Menos y Guiones en LaTeX
-
-Actividad
-Santa Cruz de Tenerife, España
-De tu dirección IP
-Actualizar ubicación
-Conversación con Gemini
-tengo una lógica como esta de aplicación, pero yo lo quiero con un enlace fijo url externa, me han hablado de vercel y chromadb o supabase, q opinas # -*- coding: utf-8 -*-
-
 """CambiosBuscador.ipynb
 
 
