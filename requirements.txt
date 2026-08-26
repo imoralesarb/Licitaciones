@@ -1,9 +1,5 @@
 fastapi
 uvicorn
-pandas
-numpy
-scikit-learn
-sentence-transformers
 requests
+pandas
 openpyxl
-jinja2
