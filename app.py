@@ -20,10 +20,6 @@ def cargar_cache():
 
 cargar_cache()
 
-@app.get("/")
-def read_root():
-    return {
-        "status": "Online",
-        "mensaje": "API de Licitaciones PLACSP activa en Vercel",
-        "licitaciones_cargadas": len(GLOBAL_DF)
-    }
+# Importamos y registramos las rutas desde nuestro archivo auxiliar
+from logica import registrar_rutas
+registrar_rutas(app, GLOBAL_DF, DATA_DIR, CACHE_DB)
