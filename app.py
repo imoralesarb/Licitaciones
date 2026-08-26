@@ -1,16 +1,12 @@
-# -*- coding: utf-8 -*-
-"""
-Buscador de Licitaciones PLACSP - Servidor FastAPI Completo (Optimizado para Vercel)
-"""
-
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 import os
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 
 app = FastAPI(title="Buscador de Licitaciones PLACSP", version="2.2")
+
 
 DATA_DIR = "/tmp/licitaciones_data"
 os.makedirs(DATA_DIR, exist_ok=True)
