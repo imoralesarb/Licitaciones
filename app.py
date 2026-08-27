@@ -1,11 +1,12 @@
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from supabase import create_client
+from datetime import date
 
 # Configuración de página
 st.set_page_config(page_title="Buscador Inteligente de Licitaciones", layout="wide")
 
-# Configuración de Supabase y Modelo (usando caché para optimizar rendimiento)
+# Configuración de Supabase y Modelo (con caché)
 @st.cache_resource
 def init_connection_and_model():
     SUPABASE_URL = "https://qtubvtxwxnwyxwwyrvzw.supabase.co"
@@ -19,64 +20,103 @@ def init_connection_and_model():
 supabase, encoder = init_connection_and_model()
 
 st.title("🏛️ Buscador Inteligente de Licitaciones (PLACSP)")
-st.markdown("Busca licitaciones de forma semántica y filtra por ubicación o plazos.")
+st.markdown("Busca contratos de forma semántica y aplica los filtros que necesites en el mismo panel.")
 
-# Barra de búsqueda principal
+# Buscador principal
 query = st.text_input("¿Qué tipo de contrato o servicio estás buscando?", placeholder="Ej: Obras de saneamiento, suministro de mobiliario...")
 
-# Barra lateral para filtros avanzados
-st.sidebar.header("Filtros Avanzados")
-filtro_lugar = st.sidebar.text_input("Filtrar por Lugar (ej: Pontevedra, Madrid...)")
-filtro_importe_min = st.sidebar.number_input("Importe mínimo (€)", min_value=0.0, value=0.0, step=1000.0)
+# Sección de filtros en la misma vista (organizados en columnas)
+st.markdown("### ⚙️ Filtros de búsqueda")
+col_f1, col_f2, col_f3 = st.columns(3)
+
+with col_f1:
+    filtro_lugar = st.text_input("📍 Lugar de ejecución", placeholder="Ej: Pontevedra, Madrid...")
+
+with col_f2:
+    filtro_fecha_cierre = st.text_input("⏳ Fecha fin de presentación (texto/parcial)", placeholder="Ej: 2026-09")
+
+with col_f3:
+    st.markdown("**📅 Intervalo de fecha de publicación**")
+    usar_filtro_fechas = st.checkbox("Activar filtro por fecha de publicación")
+    
+    # Rango de fechas por defecto (año actual 2026)
+    f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
+    f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
+
+st.markdown("---")
 
 if st.button("Buscar Licitaciones", type="primary"):
     if not query.strip():
         st.warning("Por favor, introduce un término de búsqueda.")
     else:
         with st.spinner("Buscando las mejores coincidencias con IA..."):
-            # Generar embedding de la consulta del usuario (prefijado para query en multilingual-e5)
+            # Generar embedding de la consulta del usuario
             query_vector = encoder.encode(f"query: {query}").tolist()
 
-            # Llamada a la función RPC de Supabase para búsqueda vectorial (ajusta el nombre de tu función si difiere)
             try:
+                # Llamada a la función RPC de Supabase
                 response = supabase.rpc(
                     "match_licitaciones",
                     {
                         "query_embedding": query_vector,
-                        "match_threshold": 0.3,
-                        "match_count": 15
+                        "match_threshold": 0.25,
+                        "match_count": 30
                     }
                 ).execute()
                 
                 resultados = response.data
 
-                # Aplicar filtros adicionales en Python si el usuario los indicó
-                if filtro_lugar:
-                    resultados = [r for r in resultados if r.get("lugar_ejecucion") and filtro_lugar.lower() in r["lugar_ejecucion"].lower()]
-                
-                if filtro_importe_min > 0:
-                    resultados = [r for r in resultados if r.get("importe", 0) >= filtro_importe_min]
+                # --- FILTROS APLICADOS EN PYTHON ---
+                resultados_filtrados = []
+                for r in resultados:
+                    # 1. Filtro de lugar de ejecución
+                    if filtro_lugar:
+                        lugar_reg = r.get("lugar_ejecucion", "")
+                        if not lugar_reg or filtro_lugar.lower() not in lugar_reg.lower():
+                            continue
+                    
+                    # 2. Filtro de fecha de cierre (fecha_fin)
+                    if filtro_fecha_cierre:
+                        cierre_reg = r.get("fecha_fin", "")
+                        if not cierre_reg or filtro_fecha_cierre.lower() not in cierre_reg.lower():
+                            continue
 
-                if not resultados:
+                    # 3. Filtro por intervalo de fecha de publicación
+                    if usar_filtro_fechas:
+                        fecha_pub_str = r.get("fecha", "") # Formato "YYYY-MM-DD"
+                        if fecha_pub_str:
+                            try:
+                                fecha_pub_obj = date.fromisoformat(fecha_pub_str[:10])
+                                if not (f_inicio <= fecha_pub_obj <= f_fin):
+                                    continue
+                            except ValueError:
+                                continue
+                        else:
+                            continue
+
+                    resultados_filtrados.append(r)
+
+                # --- MOSTRAR RESULTADOS ---
+                if not resultados_filtrados:
                     st.info("No se han encontrado licitaciones que coincidan con tu búsqueda y los filtros aplicados.")
                 else:
-                    st.success(f"Se han encontrado {len(resultados)} licitaciones:")
+                    st.success(f"Se han encontrado {len(resultados_filtrados)} licitaciones:")
 
-                    for item in resultados:
+                    for item in resultados_filtrados:
                         with st.container():
                             st.subheader(item.get("titulo", "Sin título"))
                             
-                            # Organizar métricas o detalles visuales
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
+                            c1, c2, c3, c4 = st.columns(4)
+                            with c1:
                                 st.metric("🏢 Órgano", item.get("organo", "Desconocido"))
-                            with col2:
+                            with c2:
                                 st.metric("💰 Importe", f"{item.get('importe', 0.0):,.2f} €")
-                            with col3:
+                            with c3:
                                 st.metric("📍 Lugar", item.get("lugar_ejecucion", "No especificado"))
+                            with c4:
+                                st.metric("📅 Cierre", item.get("fecha_fin", "No especificada"))
 
-                            # Información adicional (Fechas y enlace)
-                            st.markdown(f"📅 **Fecha límite presentación:** `{item.get('fecha_fin', 'No especificada')}`")
+                            st.text(f"Publicado el: {item.get('fecha', 'Desconocida')}")
                             
                             enlace = item.get("enlace", "")
                             if enlace:
