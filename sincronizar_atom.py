@@ -1,5 +1,5 @@
 import os
-import feedparser
+import requests
 import lxml.etree as ET
 from datetime import datetime
 from supabase import create_client, Client
@@ -11,10 +11,10 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 2. Cargar modelo de IA en CPU
-print("Cargando modelo de IA...")
+print("Cargando modelo de IA (multilingual-e5-small)...")
 encoder = SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
 
-# Namespaces idénticos a los de tu script para leer CODICE perfectamente
+# Namespaces para leer la estructura CODICE perfectamente
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "cac": "urn:dgpe:names:draft:codice:schema:xsd:CommonAggregateComponents-2",
@@ -44,12 +44,15 @@ def sincronizar():
     for fuente in FUENTES_ATOM:
         print(f"📥 Leyendo fuente: {fuente['nombre']}...")
         
-        # Usamos feedparser para descargar el feed y recorrer sus entradas raw XML si están disponibles,
-        # o parsear directamente con lxml desde la URL del ATOM.
         try:
-            # Descargar el contenido XML directamente para aprovechar lxml
-            import requests
-            response = requests.get(fuente["url"], timeout=30)
+            # Cabeceras simulando un navegador real para evitar el Timeout del servidor público
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
+            response = requests.get(fuente["url"], headers=headers, timeout=45)
+            response.raise_for_status()
+            
             parser = ET.XMLParser(recover=True)
             root = ET.fromstring(response.content, parser=parser)
         except Exception as e:
