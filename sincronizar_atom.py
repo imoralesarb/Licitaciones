@@ -1,5 +1,6 @@
 import os
 import feedparser
+import lxml.etree as ET
 from datetime import datetime
 from supabase import create_client, Client
 from sentence_transformers import SentenceTransformer
@@ -9,8 +10,18 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 2. Cargar modelo de IA en CPU (rápido y ligero para GitHub Actions)
+# 2. Cargar modelo de IA en CPU
+print("Cargando modelo de IA...")
 encoder = SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
+
+# Namespaces idénticos a los de tu script para leer CODICE perfectamente
+NS = {
+    "atom": "http://www.w3.org/2005/Atom",
+    "cac": "urn:dgpe:names:draft:codice:schema:xsd:CommonAggregateComponents-2",
+    "cbc": "urn:dgpe:names:draft:codice:schema:xsd:CommonBasicComponents-2",
+    "cac-place-ext": "urn:dgpe:names:draft:codice-place-ext:schema:xsd:CommonAggregateComponents-2",
+    "cbc-place-ext": "urn:dgpe:names:draft:codice-place-ext:schema:xsd:CommonBasicComponents-2",
+}
 
 FUENTES_ATOM = [
     {
@@ -23,55 +34,141 @@ FUENTES_ATOM = [
     }
 ]
 
+def _texto(el, xpath, ns=NS):
+    nodo = el.find(xpath, ns)
+    return nodo.text.strip() if nodo is not None and nodo.text else None
+
 def sincronizar():
-    print("🔄 Iniciando sincronización de feeds ATOM...")
+    print("🔄 Iniciando sincronización avanzada de feeds ATOM...")
     
     for fuente in FUENTES_ATOM:
         print(f"📥 Leyendo fuente: {fuente['nombre']}...")
-        feed = feedparser.parse(fuente["url"])
         
-        for entrada in feed.entries:
-            enlace = getattr(entrada, "link", "")
+        # Usamos feedparser para descargar el feed y recorrer sus entradas raw XML si están disponibles,
+        # o parsear directamente con lxml desde la URL del ATOM.
+        try:
+            # Descargar el contenido XML directamente para aprovechar lxml
+            import requests
+            response = requests.get(fuente["url"], timeout=30)
+            parser = ET.XMLParser(recover=True)
+            root = ET.fromstring(response.content, parser=parser)
+        except Exception as e:
+            print(f"❌ Error descargando {fuente['nombre']}: {e}")
+            continue
+
+        entries = root.findall('atom:entry', NS)
+        if not entries:
+            entries = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+
+        print(f"Procesando {len(entries)} entradas de {fuente['nombre']}...")
+
+        for entry in entries:
+            titulo = _texto(entry, "atom:title") or "Sin título"
+            
+            # Extracción del enlace
+            enlace_el = entry.find("atom:link", NS)
+            enlace = enlace_el.get("href") if enlace_el is not None else ""
+            if not enlace:
+                enlace_el = entry.find('.//{http://www.w3.org/2005/Atom}link')
+                enlace = enlace_el.get("href") if enlace_el is not None else ""
+            
             if not enlace:
                 continue
-                
-            titulo = getattr(entrada, "title", "Sin título")
-            organo = getattr(entrada, "author", "Desconocido")
-            fecha_pub = getattr(entrada, "published", str(datetime.now().date()))[:10]
-            
-            # Construir texto completo para el buscador inteligente
-            texto_completo = f"Título: {titulo}. Órgano: {organo}."
-            
-            # Verificar si ya existe en Supabase (para Caso 1 y Caso 2)
+
+            # Fechas
+            txt_fecha = _texto(entry, "atom:updated") or _texto(entry, "atom:published")
+            fecha = txt_fecha.split("T")[0] if txt_fecha else str(datetime.now().date())[:10]
+
+            # --- Fecha fin de presentación de oferta ---
+            fecha_fin = "No especificada"
+            try:
+                end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
+                if end_date_el is not None and end_date_el.text:
+                    fecha_fin = end_date_el.text.strip()
+            except Exception:
+                pass
+
+            # --- Lugar de ejecución ---
+            lugar_ejecucion = "No especificado"
+            try:
+                lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentity", NS)
+                if lugar_el is not None and lugar_el.text:
+                    lugar_ejecucion = lugar_el.text.strip()
+            except Exception:
+                pass
+
+            # --- Importe ---
+            importe = 0.0
+            try:
+                presupuesto_el = entry.find(".//cbc-place-ext:EstimatedOverallContractAmount", NS)
+                if presupuesto_el is None:
+                    presupuesto_el = entry.find(".//cbc:PayableAmount", NS)
+                if presupuesto_el is not None and presupuesto_el.text:
+                    importe = float(presupuesto_el.text.replace(",", "."))
+            except Exception:
+                pass
+
+            # --- Órgano contratante ---
+            organo = "Órgano desconocido"
+            try:
+                organo_el = entry.find(".//cac-place-ext:LocatedContractingParty//cac:PartyName//cbc:Name", NS)
+                if organo_el is None:
+                    organo_el = entry.find(".//cac:ContractingParty//cbc:Name", NS)
+                if organo_el is not None and organo_el.text:
+                    organo = organo_el.text.strip()
+            except Exception:
+                pass
+
+            # Descripción adicional
+            descripcion = _texto(entry, ".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:Name", NS)
+            if not descripcion:
+                descripcion = _texto(entry, ".//cac:ProcurementProject/cbc:Description", NS) or ""
+
+            # Texto enriquecido para la IA
+            texto_evaluacion = (
+                f"passage: Título: {titulo}. "
+                f"Objeto del contrato: {descripcion}. "
+                f"Órgano: {organo}. "
+                f"Lugar de ejecución: {lugar_ejecucion}. "
+                f"Fecha fin oferta: {fecha_fin}"
+            )
+
+            # Verificar si ya existe en Supabase
             resp = supabase.table("licitaciones").select("id, enlace").eq("enlace", enlace).execute()
-            
+
             if not resp.data:
                 # --- CASO 1: NUEVA LICITACIÓN ---
-                vector = encoder.encode(f"passage: {texto_completo}").tolist()
+                vector = encoder.encode(texto_evaluacion).tolist()
                 nuevo_registro = {
-                    "titulo": titulo,
-                    "organo": organo,
-                    "fecha": fecha_pub,
-                    "enlace": enlace,
-                    "texto_completo": texto_completo,
-                    "embedding": vector,
-                    "importe": 0.0, # Ajustar si extraes el importe del summary del ATOM
-                    "lugar_ejecucion": "No especificado"
+                    "titulo": titulo.strip(),
+                    "organo": organo.strip(),
+                    "fecha": fecha,
+                    "importe": importe,
+                    "enlace": enlace.strip(),
+                    "lugar_ejecucion": lugar_ejecucion,
+                    "fecha_fin": fecha_fin,
+                    "texto_completo": texto_evaluacion,
+                    "embedding": vector
                 }
                 supabase.table("licitaciones").insert(nuevo_registro).execute()
                 print(f"➕ Nueva añadida: {titulo[:30]}...")
             else:
                 # --- CASO 2: ACTUALIZACIÓN DE LICITACIÓN YA EXISTENTE ---
-                # Actualizamos los campos por si han cambiado en el feed
+                vector = encoder.encode(texto_evaluacion).tolist()
                 datos_actualizados = {
-                    "titulo": titulo,
-                    "organo": organo,
-                    "texto_completo": texto_completo
+                    "titulo": titulo.strip(),
+                    "organo": organo.strip(),
+                    "fecha": fecha,
+                    "importe": importe,
+                    "lugar_ejecucion": lugar_ejecucion,
+                    "fecha_fin": fecha_fin,
+                    "texto_completo": texto_evaluacion,
+                    "embedding": vector
                 }
                 supabase.table("licitaciones").update(datos_actualizados).eq("enlace", enlace).execute()
                 print(f"🔄 Actualizada: {titulo[:30]}...")
 
-    print("✅ Sincronización ATOM completada con éxito.")
+    print("✅ Sincronización ATOM avanzada completada con éxito.")
 
 if __name__ == "__main__":
     sincronizar()
