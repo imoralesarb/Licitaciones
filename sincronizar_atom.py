@@ -23,6 +23,50 @@ NS = {
     "cbc-place-ext": "urn:dgpe:names:draft:codice-place-ext:schema:xsd:CommonBasicComponents-2",
 }
 
+# Diccionario de correspondencias de códigos NUTS 2 y 3 de España a nombres legibles
+MAPEO_NUTS = {
+    # --- NUTS 2 (Comunidades y Ciudades Autónomas) ---
+    "ES11": "Galicia",
+    "ES12": "Principado de Asturias",
+    "ES13": "Cantabria",
+    "ES21": "País Vasco",
+    "ES22": "Comunidad Foral de Navarra",
+    "ES23": "La Rioja",
+    "ES24": "Aragón",
+    "ES30": "Comunidad de Madrid",
+    "ES41": "Castilla y León",
+    "ES42": "Castilla-La Mancha",
+    "ES43": "Extremadura",
+    "ES51": "Cataluña",
+    "ES52": "Comunidad Valenciana",
+    "ES53": "Illes Balears",
+    "ES61": "Andalucía",
+    "ES62": "Región de Murcia",
+    "ES63": "Ciudad Autónoma de Ceuta",
+    "ES64": "Ciudad Autónoma de Melilla",
+    "ES70": "Canarias",
+
+    # --- NUTS 3 (Provincias e Islas) ---
+    "ES111": "A Coruña", "ES112": "Lugo", "ES113": "Ourense", "ES114": "Pontevedra",
+    "ES120": "Asturias", "ES130": "Cantabria",
+    "ES211": "Álava", "ES212": "Guipúzcoa", "ES213": "Vizcaya",
+    "ES220": "Navarra", "ES230": "La Rioja",
+    "ES241": "Huesca", "ES242": "Teruel", "ES243": "Zaragoza",
+    "ES300": "Madrid",
+    "ES411": "Ávila", "ES412": "Burgos", "ES413": "León", "ES414": "Palencia",
+    "ES415": "Salamanca", "ES416": "Segovia", "ES417": "Soria", "ES418": "Valladolid", "ES419": "Zamora",
+    "ES421": "Albacete", "ES422": "Ciudad Real", "ES423": "Cuenca", "ES424": "Guadalajara", "ES425": "Toledo",
+    "ES431": "Badajoz", "ES432": "Cáceres",
+    "ES511": "Barcelona", "ES512": "Girona", "ES513": "Lleida", "ES514": "Tarragona",
+    "ES521": "Alicante", "ES522": "Castellón", "ES523": "Valencia",
+    "ES531": "Eivissa i Formentera", "ES532": "Mallorca", "ES533": "Menorca",
+    "ES611": "Almería", "ES612": "Cádiz", "ES613": "Córdoba", "ES614": "Granada",
+    "ES615": "Huelva", "ES616": "Jaén", "ES617": "Málaga", "ES618": "Sevilla",
+    "ES620": "Murcia", "ES630": "Ceuta", "ES640": "Melilla",
+    "ES703": "El Hierro", "ES704": "Fuerteventura", "ES705": "Gran Canaria",
+    "ES706": "La Gomera", "ES707": "La Palma", "ES708": "Lanzarote", "ES709": "Tenerife"
+}
+
 FUENTES_ATOM = [
     {
         "nombre": "Licitaciones Generales",
@@ -90,12 +134,17 @@ def sincronizar():
             except Exception:
                 pass
 
-            # --- Lugar de ejecución ---
+            # --- Lugar de ejecución (con traducción automática de códigos NUTS) ---
             lugar_ejecucion = "No especificado"
             try:
                 lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentity", NS)
                 if lugar_el is not None and lugar_el.text:
                     lugar_ejecucion = lugar_el.text.strip()
+                else:
+                    lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentityCode", NS)
+                    if lugar_el is not None and lugar_el.text:
+                        codigo_nuts = lugar_el.text.strip()
+                        lugar_ejecucion = MAPEO_NUTS.get(codigo_nuts, codigo_nuts)
             except Exception:
                 pass
 
