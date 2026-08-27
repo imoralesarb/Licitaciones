@@ -18,7 +18,7 @@ st.markdown(
 
 # Configurar la página de Streamlit
 st.set_page_config(
-    page_title="Buscador Semántico de Licitaciones", 
+    page_title="Buscador inteligente de Licitaciones", 
     page_icon="🔍", 
     layout="wide"
 )
@@ -48,8 +48,7 @@ def obtener_datos_supabase():
     return response.data
 
 # 4. Interfaz Visual
-st.title("🔍 Buscador Semántico de Licitaciones (PLACSP)")
-st.markdown("Buscador inteligente optimizado con IA y filtrado vectorial local.")
+st.title("🔍 Buscador inteligente de Licitaciones (PLACSP)")
 
 # Buscador principal
 consulta_texto = st.text_input(
