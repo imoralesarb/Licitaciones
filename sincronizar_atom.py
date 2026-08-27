@@ -45,7 +45,6 @@ def sincronizar():
         print(f"📥 Leyendo fuente: {fuente['nombre']}...")
         
         try:
-            # Cabeceras simulando un navegador real para evitar el Timeout del servidor público
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -100,16 +99,31 @@ def sincronizar():
             except Exception:
                 pass
 
-            # --- Importe ---
+            # --- Importe (Búsqueda robusta en cascada) ---
             importe = 0.0
             try:
-                presupuesto_el = entry.find(".//cbc-place-ext:EstimatedOverallContractAmount", NS)
+                presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS)
                 if presupuesto_el is None:
-                    presupuesto_el = entry.find(".//cbc:PayableAmount", NS)
+                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
+                if presupuesto_el is None:
+                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
+                
                 if presupuesto_el is not None and presupuesto_el.text:
-                    importe = float(presupuesto_el.text.replace(",", "."))
+                    importe = float(presupuesto_el.text.strip().replace(",", "."))
+                else:
+                    lotes = entry.findall(".//cac:ProcurementProjectLot", NS)
+                    if lotes:
+                        suma_lotes = 0.0
+                        for lote in lotes:
+                            lote_amt = lote.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
+                            if lote_amt is None:
+                                lote_amt = lote.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
+                            if lote_amt is not None and lote_amt.text:
+                                suma_lotes += float(lote_amt.text.strip().replace(",", "."))
+                        if suma_lotes > 0:
+                            importe = suma_lotes
             except Exception:
-                pass
+                importe = 0.0
 
             # --- Órgano contratante ---
             organo = "Órgano desconocido"
@@ -133,6 +147,7 @@ def sincronizar():
                 f"Objeto del contrato: {descripcion}. "
                 f"Órgano: {organo}. "
                 f"Lugar de ejecución: {lugar_ejecucion}. "
+                f"Importe: {importe} EUR. "
                 f"Fecha fin oferta: {fecha_fin}"
             )
 
@@ -154,7 +169,7 @@ def sincronizar():
                     "embedding": vector
                 }
                 supabase.table("licitaciones").insert(nuevo_registro).execute()
-                print(f"➕ Nueva añadida: {titulo[:30]}...")
+                print(f"➕ Nueva añadida: {titulo[:30]}... ({importe}€)")
             else:
                 # --- CASO 2: ACTUALIZACIÓN DE LICITACIÓN YA EXISTENTE ---
                 vector = encoder.encode(texto_evaluacion).tolist()
@@ -169,7 +184,7 @@ def sincronizar():
                     "embedding": vector
                 }
                 supabase.table("licitaciones").update(datos_actualizados).eq("enlace", enlace).execute()
-                print(f"🔄 Actualizada: {titulo[:30]}...")
+                print(f"🔄 Actualizada: {titulo[:30]}... ({importe}€)")
 
     print("✅ Sincronización ATOM avanzada completada con éxito.")
 
