@@ -1,142 +1,88 @@
-import os
 import streamlit as st
-import pandas as pd
-import numpy as np
-from sentence_transformers import SentenceTransformer, util
-from supabase import create_client, Client
+from sentence_transformers import SentenceTransformer
+from supabase import create_client
 
-# Desactivar traductor automático del navegador
-st.markdown(
-    """
-    <head>
-        <meta name="google" content="notranslate">
-    </head>
-    """,
-    unsafe_allow_html=True
-)
+# Configuración de página
+st.set_page_config(page_title="Buscador Inteligente de Licitaciones", layout="wide")
 
-# Configurar la página de Streamlit
-st.set_page_config(
-    page_title="Buscador Semántico de Licitaciones", 
-    page_icon="🔍", 
-    layout="wide"
-)
-
-# 1. Configuración de Credenciales
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("⚠️ Faltan las credenciales de Supabase en los Secrets de Streamlit.")
-    st.stop()
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# 2. Cargar modelo de IA en caché
+# Configuración de Supabase y Modelo (usando caché para optimizar rendimiento)
 @st.cache_resource
-def cargar_modelo():
-    return SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
+def init_connection_and_model():
+    SUPABASE_URL = "https://qtubvtxwxnwyxwwyrvzw.supabase.co"
+    SUPABASE_KEY = "sb_publishable_Qkq39W0KhkPiHqXVupok7w_xhUws0Lr"
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    print("Cargando modelo de IA en Streamlit...")
+    ai_encoder = SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
+    return supabase_client, ai_encoder
 
-with st.spinner("Cargando modelo de IA..."):
-    encoder = cargar_modelo()
+supabase, encoder = init_connection_and_model()
 
-# 3. Descargar datos de Supabase en caché para búsqueda ultra rápida y precisa
-@st.cache_data(ttl=600) # Se actualiza cada 10 minutos
-def obtener_datos_supabase():
-    response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, texto_completo, embedding").execute()
-    return response.data
+st.title("🏛️ Buscador Inteligente de Licitaciones (PLACSP)")
+st.markdown("Busca licitaciones de forma semántica y filtra por ubicación o plazos.")
 
-# 4. Interfaz Visual
-st.title("🔍 Buscador Semántico de Licitaciones (PLACSP)")
-st.markdown("Buscador inteligente optimizado con IA y filtrado vectorial local.")
+# Barra de búsqueda principal
+query = st.text_input("¿Qué tipo de contrato o servicio estás buscando?", placeholder="Ej: Obras de saneamiento, suministro de mobiliario...")
 
-# Usamos componentes fuera de un form estricto para permitir múltiples búsquedas fluidas
-consulta_texto = st.text_input(
-    "¿Qué tipo de licitación buscas?",
-    placeholder="ej. mantenimiento informático, suministro de vehículos, obras..."
-)
+# Barra lateral para filtros avanzados
+st.sidebar.header("Filtros Avanzados")
+filtro_lugar = st.sidebar.text_input("Filtrar por Lugar (ej: Pontevedra, Madrid...)")
+filtro_importe_min = st.sidebar.number_input("Importe mínimo (€)", min_value=0.0, value=0.0, step=1000.0)
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    importe_min = st.number_input("Importe Mínimo (€)", value=0.0)
-with col2:
-    importe_max = st.number_input("Importe Máximo (€)", value=0.0)
-with col3:
-    limite_resultados = st.slider("Número de resultados", min_value=5, max_value=50, value=10)
-
-btn_buscar = st.button("🔍 Buscar licitaciones", type="primary")
-
-# 5. Lógica de Búsqueda Semántica Real
-if btn_buscar:
-    if not consulta_texto.strip():
+if st.button("Buscar Licitaciones", type="primary"):
+    if not query.strip():
         st.warning("Por favor, introduce un término de búsqueda.")
     else:
-        with st.spinner("Analizando similitud semántica con IA..."):
-            data = obtener_datos_supabase()
+        with st.spinner("Buscando las mejores coincidencias con IA..."):
+            # Generar embedding de la consulta del usuario (prefijado para query en multilingual-e5)
+            query_vector = encoder.encode(f"query: {query}").tolist()
 
-            if not data:
-                st.info("No hay licitaciones en la base de datos de Supabase.")
-            else:
-                df = pd.DataFrame(data)
+            # Llamada a la función RPC de Supabase para búsqueda vectorial (ajusta el nombre de tu función si difiere)
+            try:
+                response = supabase.rpc(
+                    "match_licitaciones",
+                    {
+                        "query_embedding": query_vector,
+                        "match_threshold": 0.3,
+                        "match_count": 15
+                    }
+                ).execute()
                 
-                # Verificar si existen embeddings guardados
-                if "embedding" not in df.columns or df["embedding"].isnull().all():
-                    st.error("⚠️ Los registros en Supabase no contienen vectores (embeddings). Vuelve a realizar la carga.")
+                resultados = response.data
+
+                # Aplicar filtros adicionales en Python si el usuario los indicó
+                if filtro_lugar:
+                    resultados = [r for r in resultados if r.get("lugar_ejecucion") and filtro_lugar.lower() in r["lugar_ejecucion"].lower()]
+                
+                if filtro_importe_min > 0:
+                    resultados = [r for r in resultados if r.get("importe", 0) >= filtro_importe_min]
+
+                if not resultados:
+                    st.info("No se han encontrado licitaciones que coincidan con tu búsqueda y los filtros aplicados.")
                 else:
-                    # Generar embedding de la consulta del usuario (con prefijo del modelo e5)
-                    query_con_prefijo = f"query: {consulta_texto.strip()}"
-                    vector_query = encoder.encode(query_con_prefijo, convert_to_tensor=True)
+                    st.success(f"Se han encontrado {len(resultados)} licitaciones:")
 
-                    # Extraer todos los vectores de la base de datos
-                    vectores_db = np.array(df["embedding"].tolist())
-                    vectores_tensor = encoder.encode(df["texto_completo"].tolist(), convert_to_tensor=True)
+                    for item in resultados:
+                        with st.container():
+                            st.subheader(item.get("titulo", "Sin título"))
+                            
+                            # Organizar métricas o detalles visuales
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("🏢 Órgano", item.get("organo", "Desconocido"))
+                            with col2:
+                                st.metric("💰 Importe", f"{item.get('importe', 0.0):,.2f} €")
+                            with col3:
+                                st.metric("📍 Lugar", item.get("lugar_ejecucion", "No especificado"))
 
-                    # Calcular similitud de Coseno matemáticamente de forma precisa
-                    cos_scores = util.cos_sim(vector_query, vectores_tensor)[0]
-                    
-                    # Añadir la puntuación de relevancia al DataFrame (convertida a porcentaje de 0 a 100)
-                    df["relevancia"] = (cos_scores.cpu().numpy() * 100).round(2)
+                            # Información adicional (Fechas y enlace)
+                            st.markdown(f"📅 **Fecha límite presentación:** `{item.get('fecha_fin', 'No especificada')}`")
+                            
+                            enlace = item.get("enlace", "")
+                            if enlace:
+                                st.markdown(f"[🔗 Ver licitación oficial en la PLACSP]({enlace})")
+                            
+                            st.divider()
 
-                    # Ordenar de mayor a menor relevancia
-                    df = df.sort_values(by="relevancia", ascending=False)
-
-                    # Aplicar filtros de importe si se han definido
-                    if importe_min > 0:
-                        df = df[df["importe"] >= importe_min]
-                    if importe_max > 0:
-                        df = df[df["importe"] <= importe_max]
-
-                    # Limitar al número de resultados seleccionados
-                    df = df.head(limite_resultados)
-
-                    if df.empty:
-                        st.warning("No se encontraron resultados que cumplan con los filtros de importe indicados.")
-                    else:
-                        st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
-
-                        # Preparar la estructura de la tabla exacta que pediste
-                        tabla_final = []
-                        for idx, row in enumerate(df.itertuples(), start=1):
-                            tabla_final.append({
-                                "#": idx,
-                                "Relevancia (%)": row.relevancia,
-                                "Título": row.titulo,
-                                "Fecha": row.fecha,
-                                "Importe": f"{row.importe:,.2f} €",
-                                "Enlace": row.enlace
-                            })
-
-                        df_final = pd.DataFrame(tabla_final)
-
-                        # Mostrar tabla interactiva con enlaces 100% clickeables corregidos
-                        st.dataframe(
-                            df_final,
-                            column_config={
-                                "Enlace": st.column_config.LinkColumn(
-                                    "Enlace oficial", 
-                                    display_text="Ver licitación 🔗"
-                                )
-                            },
-                            hide_index=True,
-                            use_container_width=True
-                        )
+            except Exception as e:
+                st.error(f"Error al realizar la búsqueda en la base de datos: {e}")
