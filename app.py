@@ -1,7 +1,8 @@
 import os
 import streamlit as st
 import pandas as pd
-from sentence_transformers import SentenceTransformer
+import numpy as np
+from sentence_transformers import SentenceTransformer, util
 from supabase import create_client, Client
 
 # Desactivar traductor automático del navegador
@@ -31,7 +32,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 2. Cargar modelo de IA
+# 2. Cargar modelo de IA en caché
 @st.cache_resource
 def cargar_modelo():
     return SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
@@ -39,62 +40,65 @@ def cargar_modelo():
 with st.spinner("Cargando modelo de IA..."):
     encoder = cargar_modelo()
 
-# 3. Interfaz Visual
+# 3. Descargar datos de Supabase en caché para búsqueda ultra rápida y precisa
+@st.cache_data(ttl=600) # Se actualiza cada 10 minutos
+def obtener_datos_supabase():
+    response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, texto_completo, embedding").execute()
+    return response.data
+
+# 4. Interfaz Visual
 st.title("🔍 Buscador Semántico de Licitaciones (PLACSP)")
-st.markdown("Buscador inteligente con relevancia por inteligencia artificial.")
+st.markdown("Buscador inteligente optimizado con IA y filtrado vectorial local.")
 
-with st.form("form_busqueda"):
-    consulta_texto = st.text_input(
-        "¿Qué tipo de licitación buscas?",
-        placeholder="ej. mantenimiento informático, suministro de equipos..."
-    )
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        importe_min = st.number_input("Importe Mínimo (€)", value=0.0)
-    with col2:
-        importe_max = st.number_input("Importe Máximo (€)", value=0.0)
-    with col3:
-        limite_resultados = st.slider("Número de resultados", min_value=5, max_value=50, value=10)
-        
-    btn_buscar = st.form_submit_button("🔍 Buscar licitaciones", type="primary")
+# Usamos componentes fuera de un form estricto para permitir múltiples búsquedas fluidas
+consulta_texto = st.text_input(
+    "¿Qué tipo de licitación buscas?",
+    placeholder="ej. mantenimiento informático, suministro de vehículos, obras..."
+)
 
-# 4. Lógica de Búsqueda Semántica Vectorial
+col1, col2, col3 = st.columns(3)
+with col1:
+    importe_min = st.number_input("Importe Mínimo (€)", value=0.0)
+with col2:
+    importe_max = st.number_input("Importe Máximo (€)", value=0.0)
+with col3:
+    limite_resultados = st.slider("Número de resultados", min_value=5, max_value=50, value=10)
+
+btn_buscar = st.button("🔍 Buscar licitaciones", type="primary")
+
+# 5. Lógica de Búsqueda Semántica Real
 if btn_buscar:
     if not consulta_texto.strip():
         st.warning("Por favor, introduce un término de búsqueda.")
     else:
-        with st.spinner("Calculando similitud semántica..."):
-            try:
-                # Generar embedding de la consulta con el prefijo del modelo e5
-                query_con_prefijo = f"query: {consulta_texto.strip()}"
-                vector_query = encoder.encode(query_con_prefijo).tolist()
+        with st.spinner("Analizando similitud semántica con IA..."):
+            data = obtener_datos_supabase()
 
-                # Llamada a la función de similitud vectorial de Supabase (pgvector)
-                # (Asegúrate de que el RPC o la consulta devuelva los campos necesarios)
-                response = supabase.rpc(
-                    "buscar_licitaciones", 
-                    {
-                        "query_embedding": vector_query,
-                        "match_threshold": 0.3, # Umbral mínimo de similitud
-                        "match_count": limite_resultados
-                    }
-                ).execute()
+            if not data:
+                st.info("No hay licitaciones en la base de datos de Supabase.")
+            else:
+                df = pd.DataFrame(data)
                 
-                data = response.data
-
-                # Si no usas función RPC todavía y prefieres un respaldo rápido con tabla estándar:
-                if not data:
-                    # Fallback temporal si la función RPC no está creada en Supabase
-                    res_fallback = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace").limit(limite_resultados).execute()
-                    data = res_fallback.data
-                    for idx, item in enumerate(data):
-                        item['relevancia'] = 75.0 + (idx * 0.5) # Simulado si es por texto plano
-                
-                if not data:
-                    st.warning("No se encontraron licitaciones relacionadas.")
+                # Verificar si existen embeddings guardados
+                if "embedding" not in df.columns or df["embedding"].isnull().all():
+                    st.error("⚠️ Los registros en Supabase no contienen vectores (embeddings). Vuelve a realizar la carga.")
                 else:
-                    df = pd.DataFrame(data)
+                    # Generar embedding de la consulta del usuario (con prefijo del modelo e5)
+                    query_con_prefijo = f"query: {consulta_texto.strip()}"
+                    vector_query = encoder.encode(query_con_prefijo, convert_to_tensor=True)
+
+                    # Extraer todos los vectores de la base de datos
+                    vectores_db = np.array(df["embedding"].tolist())
+                    vectores_tensor = encoder.encode(df["texto_completo"].tolist(), convert_to_tensor=True)
+
+                    # Calcular similitud de Coseno matemáticamente de forma precisa
+                    cos_scores = util.cos_sim(vector_query, vectores_tensor)[0]
+                    
+                    # Añadir la puntuación de relevancia al DataFrame (convertida a porcentaje de 0 a 100)
+                    df["relevancia"] = (cos_scores.cpu().numpy() * 100).round(2)
+
+                    # Ordenar de mayor a menor relevancia
+                    df = df.sort_values(by="relevancia", ascending=False)
 
                     # Aplicar filtros de importe si se han definido
                     if importe_min > 0:
@@ -102,20 +106,20 @@ if btn_buscar:
                     if importe_max > 0:
                         df = df[df["importe"] <= importe_max]
 
-                    if df.empty:
-                        st.warning("No hay resultados que cumplan con los filtros de importe especificados.")
-                    else:
-                        st.success(f"¡Se han encontrado {len(df)} licitaciones!")
+                    # Limitar al número de resultados seleccionados
+                    df = df.head(limite_resultados)
 
-                        # Preparar la estructura de la tabla idéntica a tu ejemplo
+                    if df.empty:
+                        st.warning("No se encontraron resultados que cumplan con los filtros de importe indicados.")
+                    else:
+                        st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
+
+                        # Preparar la estructura de la tabla exacta que pediste
                         tabla_final = []
                         for idx, row in enumerate(df.itertuples(), start=1):
-                            # Calcular porcentaje de relevancia limpio (si viene de similitud de coseno)
-                            similitud = getattr(row, 'similitud', 0.85) * 100 
-                            
                             tabla_final.append({
                                 "#": idx,
-                                "Relevancia (%)": round(float(similitud), 2),
+                                "Relevancia (%)": row.relevancia,
                                 "Título": row.titulo,
                                 "Fecha": row.fecha,
                                 "Importe": f"{row.importe:,.2f} €",
@@ -124,34 +128,15 @@ if btn_buscar:
 
                         df_final = pd.DataFrame(tabla_final)
 
-                        # Mostrar tabla interactiva en Streamlit con enlaces clickeables
+                        # Mostrar tabla interactiva con enlaces 100% clickeables corregidos
                         st.dataframe(
                             df_final,
                             column_config={
-                                "Enlace": st.column.LinkColumn("Enlace oficial", display_text="Ver licitación 🔗")
+                                "Enlace": st.column_config.LinkColumn(
+                                    "Enlace oficial", 
+                                    display_text="Ver licitación 🔗"
+                                )
                             },
                             hide_index=True,
                             use_container_width=True
                         )
-
-            except Exception as e:
-                # Si la función RPC de Supabase da error por no estar creada aún, hacemos la consulta directa de respaldo
-                try:
-                    res_fallback = supabase.table("licitaciones").select("titulo, fecha, importe, enlace").limit(limite_resultados).execute()
-                    if res_fallback.data:
-                        df_fb = pd.DataFrame(res_fallback.data)
-                        tabla_fb = []
-                        for idx, row in enumerate(df_fb.itertuples(), start=1):
-                            tabla_fb.append({
-                                "#": idx,
-                                "Relevancia (%)": round(90.0 - (idx * 0.5), 2),
-                                "Título": row.titulo,
-                                "Fecha": row.fecha,
-                                "Importe": f"{row.importe:,.2f} €",
-                                "Enlace": row.enlace
-                            })
-                        st.dataframe(pd.DataFrame(tabla_fb), hide_index=True, use_container_width=True)
-                    else:
-                        st.info("La tabla está vacía actualmente.")
-                except Exception as inner_e:
-                    st.error(f"Error en la consulta: {inner_e}")
