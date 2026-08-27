@@ -47,13 +47,52 @@ def obtener_datos_supabase():
     response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding").execute()
     return response.data
 
-# 4. Interfaz Visual
+# Diccionario geográfico para relacionar Comunidades Autónomas con sus provincias e islas principales
+MAPA_TERRITORIAL = {
+    "Todas las CCAA": [],
+    "Andalucía": ["Andalucía", "Almería", "Cádiz", "Córdoba", "Granada", "Huelva", "Jaén", "Málaga", "Sevilla"],
+    "Aragón": ["Aragón", "Huesca", "Teruel", "Zaragoza"],
+    "Asturias (Principado de)": ["Asturias", "Oviedo", "Gijón"],
+    "Illes Balears / Islas Baleares": ["Baleares", "Balears", "Mallorca", "Menorca", "Ibiza", "Formentera", "Palma"],
+    "Canarias": ["Canarias", "Tenerife", "Gran Canaria", "Lanzarote", "Fuerteventura", "La Palma", "La Gomera", "El Hierro", "Las Palmas", "Santa Cruz de Tenerife"],
+    "Cantabria": ["Cantabria", "Santander"],
+    "Castilla-La Mancha": ["Castilla-La Mancha", "Albacete", "Ciudad Real", "Cuenca", "Guadalajara", "Toledo"],
+    "Castilla y León": ["Castilla y León", "Ávila", "Burgos", "León", "Palencia", "Salamanca", "Segovia", "Soria", "Valladolid", "Zamora"],
+    "Cataluña": ["Cataluña", "Catalunya", "Barcelona", "Gerona", "Girona", "Lérida", "Lleida", "Tarragona"],
+    "Comunitat Valenciana": ["Valenciana", "Valencia", "Alicante", "Castellón"],
+    "Extremadura": ["Extremadura", "Badajoz", "Cáceres"],
+    "Galicia": ["Galicia", "Coruña", "A Coruña", "Lugo", "Ourense", "Orense", "Pontevedra", "Vigo"],
+    "Madrid (Comunidad de)": ["Madrid"],
+    "Murcia (Región de)": ["Murcia"],
+    "Navarra (Comunidad Foral de)": ["Navarra", "Pamplona"],
+    "País Vasco": ["País Vasco", "Euskadi", "Álava", "Araba", "Guipúzcoa", "Gipuzkoa", "Vizcaya", "Bizkaia", "Bilbao", "San Sebastián", "Vitoria"],
+    "La Rioja": ["La Rioja", "Logroño"],
+    "Ceuta": ["Ceuta"],
+    "Melilla": ["Melilla"]
+}
+
+# 4. Interfaz Visual y Gestión de Estado (para el botón de limpiar)
 st.title("🔍 Buscador inteligente de Licitaciones (PLACSP)")
 
-# Buscador principal (ahora opcional)
+# Inicializar session_state si no existe
+if "reset_trigger" not in st.session_state:
+    st.session_state.reset_trigger = 0
+
+def limpiar_campos():
+    st.session_state.consulta_texto = ""
+    st.session_state.filtro_ccaa = "Todas las CCAA"
+    st.session_state.filtro_fecha_cierre = ""
+    st.session_state.importe_min = 0.0
+    st.session_state.importe_max = 0.0
+    st.session_state.limite_resultados = 10
+    st.session_state.mostrar_todos = False
+    st.session_state.usar_filtro_fechas = False
+
+# Buscador principal
 consulta_texto = st.text_input(
     "¿Qué tipo de licitación buscas? (Opcional)",
-    placeholder="ej. mantenimiento informático, suministro de vehículos, obras..."
+    placeholder="ej. mantenimiento informático, suministro de vehículos, obras...",
+    key="consulta_texto"
 )
 
 # Panel de filtros integrados en la misma vista
@@ -61,23 +100,32 @@ st.markdown("### ⚙️ Filtros avanzados")
 col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
-    importe_min = st.number_input("Importe Mínimo (€)", value=0.0)
+    importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
 with col2:
-    importe_max = st.number_input("Importe Máximo (€)", value=0.0)
+    importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
-    filtro_lugar = st.text_input("📍 Lugar de ejecución", placeholder="ej. Pontevedra")
+    # Desplegable de Comunidades Autónomas inteligente
+    lista_ccaa = list(MAPA_TERRITORIAL.keys())
+    filtro_ccaa = st.selectbox("📍 Lugar (Comunidad / Isla)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    filtro_fecha_cierre = st.text_input("⏳ Fecha fin (texto/parcial)", placeholder="ej. 2026-09")
+    filtro_fecha_cierre = st.text_input("⏳ Fecha fin (texto/parcial)", placeholder="ej. 2026-09", key="filtro_fecha_cierre")
 with col5:
-    limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10)
+    limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
-# Opción para mostrar todos los resultados posibles y control de fecha de publicación
-col_chk1, col_chk2 = st.columns([1, 3])
+# Opción para mostrar todos los resultados posibles, control de fechas y Botón de Limpiar
+col_chk1, col_chk2, col_btn = st.columns([1, 2, 1])
 with col_chk1:
-    mostrar_todos = st.checkbox("Mostrar TODOS los resultados")
+    mostrar_todos = st.checkbox("Mostrar TODOS", key="mostrar_todos")
 
-with st.expander("📅 Filtrar por intervalo de fecha de publicación"):
-    usar_filtro_fechas = st.checkbox("Activar rango de fechas de publicación")
+with col_chk2:
+    usar_filtro_fechas = st.checkbox("📅 Activar rango de fechas de publicación", key="usar_filtro_fechas")
+
+with col_btn:
+    st.write("") # Espaciador visual alineado
+    st.button("🔄 Limpiar Filtros", on_click=limpiar_campos, type="secondary")
+
+# Desplegable de fechas de publicación si está activo
+if usar_filtro_fechas:
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
@@ -118,7 +166,7 @@ if btn_buscar:
                     df = df.sort_values(by="relevancia", ascending=False)
             else:
                 # Si no introduce temática, por defecto se muestran las más recientes
-                df["relevancia"] = 100.0 # Valor neutro o informativo
+                df["relevancia"] = 100.0 
                 if "fecha" in df.columns:
                     df = df.sort_values(by="fecha", ascending=False)
 
@@ -128,8 +176,12 @@ if btn_buscar:
             if importe_max > 0:
                 df = df[df["importe"] <= importe_max]
             
-            if filtro_lugar.strip():
-                df = df[df["lugar_ejecucion"].str.contains(filtro_lugar.strip(), case=False, na=False)]
+            # Filtro inteligente de CCAA / Islas / Provincias asociadas
+            if filtro_ccaa != "Todas las CCAA":
+                palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
+                # Crear patrón regex combinando las palabras clave asociadas (ej. Canarias incluye La Gomera, Tenerife, etc.)
+                patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
+                df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False)]
             
             if filtro_fecha_cierre.strip():
                 df = df[df["fecha_fin"].str.contains(filtro_fecha_cierre.strip(), case=False, na=False)]
@@ -154,7 +206,7 @@ if btn_buscar:
             else:
                 st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
 
-                # Preparar la estructura de la tabla idéntica a la original pero añadiendo los nuevos campos
+                # Preparar la estructura de la tabla idéntica a la original añadiendo los campos
                 tabla_final = []
                 for idx, row in enumerate(df.itertuples(), start=1):
                     tabla_final.append({
