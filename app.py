@@ -23,6 +23,36 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- ESTILOS CSS PERSONALIZADOS PARA LOS BOTONES ---
+st.markdown(
+    """
+    <style>
+        /* Estilo para hacer el botón principal de búsqueda grande y azul */
+        div.stButton > button:first-child {
+            background-color: #0066cc;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            border: none;
+            width: 100%;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        div.stButton > button:first-child:hover {
+            background-color: #0052a3;
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+            color: white;
+        }
+        
+        /* Estilo específico para diferenciar el botón de limpiar si se desea */
+        /* (Streamlit aplica la clase general a ambos, pero quedan perfectamente alineados en columnas) */
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # 1. Configuración de Credenciales
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
@@ -187,7 +217,6 @@ with col1:
 with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
-    # Desplegable completo con CCAA generales e islas/provincias desglosadas
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
     filtro_ccaa = st.selectbox("📍 Lugar de ejecución", lista_ccaa, key="filtro_ccaa")
 with col4:
@@ -195,17 +224,12 @@ with col4:
 with col5:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
-# Opción para mostrar todos los resultados posibles, control de fechas y Botón de Limpiar
-col_chk1, col_chk2, col_btn = st.columns([1, 2, 1])
+# Checkboxes de control secundario
+col_chk1, col_chk2 = st.columns([1, 3])
 with col_chk1:
     mostrar_todos = st.checkbox("Mostrar TODOS", key="mostrar_todos")
-
 with col_chk2:
     usar_filtro_fechas = st.checkbox("📅 Activar rango de fechas de publicación", key="usar_filtro_fechas")
-
-with col_btn:
-    st.write("") 
-    st.button("🔄 Limpiar Filtros", on_click=limpiar_campos, type="secondary")
 
 if usar_filtro_fechas:
     col_f1, col_f2 = st.columns(2)
@@ -214,7 +238,17 @@ if usar_filtro_fechas:
     with col_f2:
         f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
 
-btn_buscar = st.button("🔍 Buscar licitaciones", type="primary")
+st.write("") # Espaciador vertical
+
+# --- BOTONES DE ACCIÓN PRINCIPAL EN LA MISMA LÍNEA ---
+col_btn_buscar, col_btn_limpiar, col_vacio = st.columns([2, 2, 4])
+
+with col_btn_buscar:
+    btn_buscar = st.button("🔍 Buscar licitaciones", type="primary", use_container_width=True)
+
+with col_btn_limpiar:
+    btn_limpiar = st.button("🔄 Limpiar Filtros", on_click=limpiar_campos, type="secondary", use_container_width=True)
+
 
 # 5. Lógica de Búsqueda y Filtrado
 if btn_buscar:
@@ -249,7 +283,6 @@ if btn_buscar:
             if importe_max > 0:
                 df = df[df["importe"] <= importe_max]
             
-            # Filtro inteligente por CCAA o isla específica seleccionada
             if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
                 patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
