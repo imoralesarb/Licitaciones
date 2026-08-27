@@ -22,7 +22,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install --upgrade pip
-          pip install feedparser supabase sentence-transformers
+          pip install feedparser supabase sentence-transformers lxml requests
 
       - name: Ejecutar script de sincronización
         env:
