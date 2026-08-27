@@ -27,7 +27,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* Estilo para hacer el botón principal de búsqueda grande y azul */
         div.stButton > button:first-child {
             background-color: #0066cc;
             color: white;
@@ -45,9 +44,6 @@ st.markdown(
             box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
             color: white;
         }
-        
-        /* Estilo específico para diferenciar el botón de limpiar si se desea */
-        /* (Streamlit aplica la clase general a ambos, pero quedan perfectamente alineados en columnas) */
     </style>
     """,
     unsafe_allow_html=True
@@ -72,12 +68,12 @@ with st.spinner("Cargando modelo de IA..."):
     encoder = cargar_modelo()
 
 # 3. Descargar datos de Supabase incluyendo los nuevos campos para filtros
-@st.cache_data(ttl=600) # Se actualiza cada 10 minutos
+@st.cache_data(ttl=600)
 def obtener_datos_supabase():
     response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding").execute()
     return response.data
 
-# MAPA TERRITORIAL COMPLETO DE ESPAÑA (CCAA + Provincias / Islas desglosadas)
+# MAPA TERRITORIAL COMPLETO DE ESPAÑA
 MAPA_TERRITORIAL = {
     "🌐 Todas las CCAA / Ubicaciones": [],
     
@@ -194,6 +190,7 @@ st.title("🔍 Buscador inteligente de Licitaciones (PLACSP)")
 def limpiar_campos():
     st.session_state.consulta_texto = ""
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
+    st.session_state.filtro_lugar_libre = ""
     st.session_state.filtro_fecha_cierre = ""
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
@@ -218,18 +215,21 @@ with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox("📍 Lugar de ejecución", lista_ccaa, key="filtro_ccaa")
+    filtro_ccaa = st.selectbox("📍 Lugar (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    filtro_fecha_cierre = st.text_input("⏳ Fecha fin (texto/parcial)", placeholder="ej. 2026-09", key="filtro_fecha_cierre")
+    # NUEVO: Campo de texto libre por si el lugar exacto no está en el desplegable
+    filtro_lugar_libre = st.text_input("📍 Lugar específico (Libre)", placeholder="ej. San Sebastián de la Gomera", key="filtro_lugar_libre")
 with col5:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
-# Checkboxes de control secundario
-col_chk1, col_chk2 = st.columns([1, 3])
+# Checkboxes de control secundario y fecha de cierre
+col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
     mostrar_todos = st.checkbox("Mostrar TODOS", key="mostrar_todos")
 with col_chk2:
-    usar_filtro_fechas = st.checkbox("📅 Activar rango de fechas de publicación", key="usar_filtro_fechas")
+    usar_filtro_fechas = st.checkbox("📅 Rango fecha publicación", key="usar_filtro_fechas")
+with col_chk3:
+    filtro_fecha_cierre = st.text_input("⏳ Fecha fin (parcial)", placeholder="ej. 2026-09", key="filtro_fecha_cierre")
 
 if usar_filtro_fechas:
     col_f1, col_f2 = st.columns(2)
@@ -238,7 +238,7 @@ if usar_filtro_fechas:
     with col_f2:
         f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
 
-st.write("") # Espaciador vertical
+st.write("") 
 
 # --- BOTONES DE ACCIÓN PRINCIPAL EN LA MISMA LÍNEA ---
 col_btn_buscar, col_btn_limpiar, col_vacio = st.columns([2, 2, 4])
@@ -283,10 +283,15 @@ if btn_buscar:
             if importe_max > 0:
                 df = df[df["importe"] <= importe_max]
             
+            # Filtro por desplegable territorial
             if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
                 patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
                 df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False)]
+            
+            # Filtro adicional por texto libre de lugar específico
+            if filtro_lugar_libre.strip():
+                df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
             
             if filtro_fecha_cierre.strip():
                 df = df[df["fecha_fin"].str.contains(filtro_fecha_cierre.strip(), case=False, na=False)]
