@@ -191,12 +191,12 @@ def limpiar_campos():
     st.session_state.consulta_texto = ""
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_lugar_libre = ""
-    st.session_state.filtro_fecha_cierre = ""
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
     st.session_state.limite_resultados = 10
     st.session_state.mostrar_todos = False
     st.session_state.usar_filtro_fechas = False
+    st.session_state.usar_filtro_cierre = False
 
 # Buscador principal
 consulta_texto = st.text_input(
@@ -217,26 +217,33 @@ with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
     filtro_ccaa = st.selectbox("📍 Lugar (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    # NUEVO: Campo de texto libre por si el lugar exacto no está en el desplegable
     filtro_lugar_libre = st.text_input("📍 Lugar específico (Libre)", placeholder="ej. San Sebastián de la Gomera", key="filtro_lugar_libre")
 with col5:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
-# Checkboxes de control secundario y fecha de cierre
+# Controles secundarios y calendarios de fechas
 col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
     mostrar_todos = st.checkbox("Mostrar TODOS", key="mostrar_todos")
 with col_chk2:
     usar_filtro_fechas = st.checkbox("📅 Rango fecha publicación", key="usar_filtro_fechas")
 with col_chk3:
-    filtro_fecha_cierre = st.text_input("⏳ Fecha fin (parcial)", placeholder="ej. 2026-09", key="filtro_fecha_cierre")
+    usar_filtro_cierre = st.checkbox("⏳ Filtrar por Fecha Fin Mínima", key="usar_filtro_cierre")
 
+# Desplegables de calendarios si están activos
 if usar_filtro_fechas:
+    st.markdown("##### Rango de Fecha de Publicación")
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
+        f_inicio = st.date_input("Desde (Publicación)", value=date(2026, 1, 1))
     with col_f2:
-        f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
+        f_fin = st.date_input("Hasta (Publicación)", value=date(2026, 12, 31))
+
+if usar_filtro_cierre:
+    st.markdown("##### Fecha Cierre / Límite (Muestra las que acaban en este día o después)")
+    col_c1, _ = st.columns([1, 1])
+    with col_c1:
+        fecha_cierre_tope = st.date_input("Fecha tope mínima de fin", value=date(2026, 3, 1))
 
 st.write("") 
 
@@ -293,11 +300,21 @@ if btn_buscar:
             if filtro_lugar_libre.strip():
                 df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
             
-            if filtro_fecha_cierre.strip():
-                df = df[df["fecha_fin"].str.contains(filtro_fecha_cierre.strip(), case=False, na=False)]
+            # Filtro inteligente de fecha fin (mantiene las que expiren en la fecha seleccionada o más adelante)
+            if usar_filtro_cierre:
+                def filtrar_fecha_fin(f_str):
+                    if not f_str:
+                        return False
+                    try:
+                        obj_f = date.fromisoformat(f_str[:10])
+                        return obj_f >= fecha_cierre_tope
+                    except ValueError:
+                        return False
+                df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
 
+            # Filtro de rango de fecha de publicación
             if usar_filtro_fechas:
-                def filtrar_fecha(f_str):
+                def filtrar_fecha_pub(f_str):
                     if not f_str:
                         return False
                     try:
@@ -305,7 +322,7 @@ if btn_buscar:
                         return f_inicio <= obj_f <= f_fin
                     except ValueError:
                         return False
-                df = df[df["fecha"].apply(filtrar_fecha)]
+                df = df[df["fecha"].apply(filtrar_fecha_pub)]
 
             if not mostrar_todos:
                 df = df.head(limite_resultados)
