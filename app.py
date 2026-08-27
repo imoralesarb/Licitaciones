@@ -185,7 +185,7 @@ MAPA_TERRITORIAL = {
 }
 
 # 4. Interfaz Visual y Gestión de Estado
-st.title("🔍 Buscador inteligente de Licitaciones (PLACSP)")
+st.title("🔍 Buscador inteligente de Licitaciones")
 
 def limpiar_campos():
     st.session_state.consulta_texto = ""
@@ -200,7 +200,7 @@ def limpiar_campos():
 
 # Buscador principal
 consulta_texto = st.text_input(
-    "¿Qué tipo de licitación buscas? (Opcional)",
+    "¿Qué tipo de licitación buscas?",
     placeholder="ej. mantenimiento informático, suministro de vehículos, obras...",
     key="consulta_texto"
 )
@@ -215,9 +215,9 @@ with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox("📍 Lugar (Desplegable)", lista_ccaa, key="filtro_ccaa")
+    filtro_ccaa = st.selectbox("📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    filtro_lugar_libre = st.text_input("📍 Lugar específico (Libre)", placeholder="ej. San Sebastián de la Gomera", key="filtro_lugar_libre")
+    filtro_lugar_libre = st.text_input("📍 Lugar de ejecución (Libre)", placeholder="ej. San Sebastián de la Gomera", key="filtro_lugar_libre")
 with col5:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
@@ -226,24 +226,24 @@ col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
     mostrar_todos = st.checkbox("Mostrar TODOS", key="mostrar_todos")
 with col_chk2:
-    usar_filtro_fechas = st.checkbox("📅 Rango fecha publicación", key="usar_filtro_fechas")
+    usar_filtro_fechas = st.checkbox("📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas")
 with col_chk3:
-    usar_filtro_cierre = st.checkbox("⏳ Filtrar por Fecha Fin Mínima", key="usar_filtro_cierre")
+    usar_filtro_cierre = st.checkbox("⏳ Fecha fin de presentación de oferta", key="usar_filtro_cierre")
 
 # Desplegables de calendarios si están activos
 if usar_filtro_fechas:
-    st.markdown("##### Rango de Fecha de Publicación")
+    st.markdown("##### Rango de fecha de publicación")
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        f_inicio = st.date_input("Desde (Publicación)", value=date(2026, 1, 1))
+        f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
     with col_f2:
-        f_fin = st.date_input("Hasta (Publicación)", value=date(2026, 12, 31))
+        f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
 
 if usar_filtro_cierre:
-    st.markdown("##### Fecha Cierre / Límite (Muestra las que acaban en este día o después)")
+    st.markdown("##### Fecha fin de presentación de oferta (Muestra las que acaban en este día o después)")
     col_c1, _ = st.columns([1, 1])
     with col_c1:
-        fecha_cierre_tope = st.date_input("Fecha tope mínima de fin", value=date(2026, 3, 1))
+        fecha_cierre_tope = st.date_input("Fecha tope mínima de fin de presentación", value=date(2026, 3, 1))
 
 st.write("") 
 
