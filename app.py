@@ -1,128 +1,178 @@
+import os
 import streamlit as st
-from sentence_transformers import SentenceTransformer
-from supabase import create_client
+import pandas as pd
+import numpy as np
+from sentence_transformers import SentenceTransformer, util
+from supabase import create_client, Client
 from datetime import date
 
-# Configuración de página
-st.set_page_config(page_title="Buscador Inteligente de Licitaciones", layout="wide")
+# Desactivar traductor automático del navegador
+st.markdown(
+    """
+    <head>
+        <meta name="google" content="notranslate">
+    </head>
+    """,
+    unsafe_allow_html=True
+)
 
-# Configuración de Supabase y Modelo (con caché)
+# Configurar la página de Streamlit
+st.set_page_config(
+    page_title="Buscador Semántico de Licitaciones", 
+    page_icon="🔍", 
+    layout="wide"
+)
+
+# 1. Configuración de Credenciales
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("⚠️ Faltan las credenciales de Supabase en los Secrets de Streamlit.")
+    st.stop()
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# 2. Cargar modelo de IA en caché
 @st.cache_resource
-def init_connection_and_model():
-    SUPABASE_URL = "https://qtubvtxwxnwyxwwyrvzw.supabase.co"
-    SUPABASE_KEY = "sb_publishable_Qkq39W0KhkPiHqXVupok7w_xhUws0Lr"
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    
-    print("Cargando modelo de IA en Streamlit...")
-    ai_encoder = SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
-    return supabase_client, ai_encoder
+def cargar_modelo():
+    return SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
 
-supabase, encoder = init_connection_and_model()
+with st.spinner("Cargando modelo de IA..."):
+    encoder = cargar_modelo()
 
-st.title("🏛️ Buscador Inteligente de Licitaciones (PLACSP)")
-st.markdown("Busca contratos de forma semántica y aplica los filtros que necesites en el mismo panel.")
+# 3. Descargar datos de Supabase incluyendo los nuevos campos para filtros
+@st.cache_data(ttl=600) # Se actualiza cada 10 minutos
+def obtener_datos_supabase():
+    response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding").execute()
+    return response.data
+
+# 4. Interfaz Visual
+st.title("🔍 Buscador Semántico de Licitaciones (PLACSP)")
+st.markdown("Buscador inteligente optimizado con IA y filtrado vectorial local.")
 
 # Buscador principal
-query = st.text_input("¿Qué tipo de contrato o servicio estás buscando?", placeholder="Ej: Obras de saneamiento, suministro de mobiliario...")
+consulta_texto = st.text_input(
+    "¿Qué tipo de licitación buscas?",
+    placeholder="ej. mantenimiento informático, suministro de vehículos, obras..."
+)
 
-# Sección de filtros en la misma vista (organizados en columnas)
-st.markdown("### ⚙️ Filtros de búsqueda")
-col_f1, col_f2, col_f3 = st.columns(3)
+# Panel de filtros integrados en la misma vista
+st.markdown("### ⚙️ Filtros avanzados")
+col1, col2, col3, col4, col5 = st.columns(5)
 
-with col_f1:
-    filtro_lugar = st.text_input("📍 Lugar de ejecución", placeholder="Ej: Pontevedra, Madrid...")
+with col1:
+    importe_min = st.number_input("Importe Mínimo (€)", value=0.0)
+with col2:
+    importe_max = st.number_input("Importe Máximo (€)", value=0.0)
+with col3:
+    filtro_lugar = st.text_input("📍 Lugar de ejecución", placeholder="ej. Pontevedra")
+with col4:
+    filtro_fecha_cierre = st.text_input("⏳ Fecha fin (texto/parcial)", placeholder="ej. 2026-09")
+with col5:
+    limite_resultados = st.slider("Resultados", min_value=5, max_value=50, value=10)
 
-with col_f2:
-    filtro_fecha_cierre = st.text_input("⏳ Fecha fin de presentación (texto/parcial)", placeholder="Ej: 2026-09")
+# Intervalo de fecha de publicación opcional
+with st.expander("📅 Filtrar por intervalo de fecha de publicación"):
+    usar_filtro_fechas = st.checkbox("Activar rango de fechas de publicación")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
+    with col_f2:
+        f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
 
-with col_f3:
-    st.markdown("**📅 Intervalo de fecha de publicación**")
-    usar_filtro_fechas = st.checkbox("Activar filtro por fecha de publicación")
-    
-    # Rango de fechas por defecto (año actual 2026)
-    f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
-    f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
+btn_buscar = st.button("🔍 Buscar licitaciones", type="primary")
 
-st.markdown("---")
-
-if st.button("Buscar Licitaciones", type="primary"):
-    if not query.strip():
+# 5. Lógica de Búsqueda Semántica Real
+if btn_buscar:
+    if not consulta_texto.strip():
         st.warning("Por favor, introduce un término de búsqueda.")
     else:
-        with st.spinner("Buscando las mejores coincidencias con IA..."):
-            # Generar embedding de la consulta del usuario
-            query_vector = encoder.encode(f"query: {query}").tolist()
+        with st.spinner("Analizando similitud semántica con IA..."):
+            data = obtener_datos_supabase()
 
-            try:
-                # Llamada a la función RPC de Supabase
-                response = supabase.rpc(
-                    "match_licitaciones",
-                    {
-                        "query_embedding": query_vector,
-                        "match_threshold": 0.25,
-                        "match_count": 30
-                    }
-                ).execute()
+            if not data:
+                st.info("No hay licitaciones en la base de datos de Supabase.")
+            else:
+                df = pd.DataFrame(data)
                 
-                resultados = response.data
-
-                # --- FILTROS APLICADOS EN PYTHON ---
-                resultados_filtrados = []
-                for r in resultados:
-                    # 1. Filtro de lugar de ejecución
-                    if filtro_lugar:
-                        lugar_reg = r.get("lugar_ejecucion", "")
-                        if not lugar_reg or filtro_lugar.lower() not in lugar_reg.lower():
-                            continue
-                    
-                    # 2. Filtro de fecha de cierre (fecha_fin)
-                    if filtro_fecha_cierre:
-                        cierre_reg = r.get("fecha_fin", "")
-                        if not cierre_reg or filtro_fecha_cierre.lower() not in cierre_reg.lower():
-                            continue
-
-                    # 3. Filtro por intervalo de fecha de publicación
-                    if usar_filtro_fechas:
-                        fecha_pub_str = r.get("fecha", "") # Formato "YYYY-MM-DD"
-                        if fecha_pub_str:
-                            try:
-                                fecha_pub_obj = date.fromisoformat(fecha_pub_str[:10])
-                                if not (f_inicio <= fecha_pub_obj <= f_fin):
-                                    continue
-                            except ValueError:
-                                continue
-                        else:
-                            continue
-
-                    resultados_filtrados.append(r)
-
-                # --- MOSTRAR RESULTADOS ---
-                if not resultados_filtrados:
-                    st.info("No se han encontrado licitaciones que coincidan con tu búsqueda y los filtros aplicados.")
+                # Verificar si existen embeddings guardados
+                if "embedding" not in df.columns or df["embedding"].isnull().all():
+                    st.error("⚠️ Los registros en Supabase no contienen vectores (embeddings). Vuelve a realizar la carga.")
                 else:
-                    st.success(f"Se han encontrado {len(resultados_filtrados)} licitaciones:")
+                    # Generar embedding de la consulta del usuario (con prefijo del modelo e5)
+                    query_con_prefijo = f"query: {consulta_texto.strip()}"
+                    vector_query = encoder.encode(query_con_prefijo, convert_to_tensor=True)
 
-                    for item in resultados_filtrados:
-                        with st.container():
-                            st.subheader(item.get("titulo", "Sin título"))
-                            
-                            c1, c2, c3, c4 = st.columns(4)
-                            with c1:
-                                st.metric("🏢 Órgano", item.get("organo", "Desconocido"))
-                            with c2:
-                                st.metric("💰 Importe", f"{item.get('importe', 0.0):,.2f} €")
-                            with c3:
-                                st.metric("📍 Lugar", item.get("lugar_ejecucion", "No especificado"))
-                            with c4:
-                                st.metric("📅 Cierre", item.get("fecha_fin", "No especificada"))
+                    # Extraer todos los vectores de la base de datos
+                    vectores_tensor = encoder.encode(df["texto_completo"].tolist(), convert_to_tensor=True)
 
-                            st.text(f"Publicado el: {item.get('fecha', 'Desconocida')}")
-                            
-                            enlace = item.get("enlace", "")
-                            if enlace:
-                                st.markdown(f"[🔗 Ver licitación oficial en la PLACSP]({enlace})")
-                            
-                            st.divider()
+                    # Calcular similitud de Coseno matemáticamente de forma precisa
+                    cos_scores = util.cos_sim(vector_query, vectores_tensor)[0]
+                    
+                    # Añadir la puntuación de relevancia al DataFrame (convertida a porcentaje de 0 a 100)
+                    df["relevancia"] = (cos_scores.cpu().numpy() * 100).round(2)
 
-            except Exception as e:
-                st.error(f"Error al realizar la búsqueda en la base de datos: {e}")
+                    # Ordenar de mayor a menor relevancia
+                    df = df.sort_values(by="relevancia", ascending=False)
+
+                    # --- APLICAR FILTROS ---
+                    if importe_min > 0:
+                        df = df[df["importe"] >= importe_min]
+                    if importe_max > 0:
+                        df = df[df["importe"] <= importe_max]
+                    
+                    if filtro_lugar.strip():
+                        df = df[df["lugar_ejecucion"].str.contains(filtro_lugar.strip(), case=False, na=False)]
+                    
+                    if filtro_fecha_cierre.strip():
+                        df = df[df["fecha_fin"].str.contains(filtro_fecha_cierre.strip(), case=False, na=False)]
+
+                    if usar_filtro_fechas:
+                        def filtrar_fecha(f_str):
+                            if not f_str:
+                                return False
+                            try:
+                                obj_f = date.fromisoformat(f_str[:10])
+                                return f_inicio <= obj_f <= f_fin
+                            except ValueError:
+                                return False
+                        df = df[df["fecha"].apply(filtrar_fecha)]
+
+                    # Limitar al número de resultados seleccionados
+                    df = df.head(limite_resultados)
+
+                    if df.empty:
+                        st.warning("No se encontraron resultados que cumplan con los filtros indicados.")
+                    else:
+                        st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
+
+                        # Preparar la estructura de la tabla idéntica a la original pero añadiendo los nuevos campos
+                        tabla_final = []
+                        for idx, row in enumerate(df.itertuples(), start=1):
+                            tabla_final.append({
+                                "#": idx,
+                                "Relevancia (%)": row.relevancia,
+                                "Título": row.titulo,
+                                "Órgano": row.organo,
+                                "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
+                                "Cierre": getattr(row, "fecha_fin", "No especificada"),
+                                "Fecha Pub.": row.fecha,
+                                "Importe": f"{row.importe:,.2f} €",
+                                "Enlace": row.enlace
+                            })
+
+                        df_final = pd.DataFrame(tabla_final)
+
+                        # Mostrar tabla interactiva con enlaces 100% clickeables
+                        st.dataframe(
+                            df_final,
+                            column_config={
+                                "Enlace": st.column_config.LinkColumn(
+                                    "Enlace oficial", 
+                                    display_text="Ver licitación 🔗"
+                                )
+                            },
+                            hide_index=True,
+                            use_container_width=True
+                        )
