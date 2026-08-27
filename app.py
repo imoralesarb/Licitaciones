@@ -50,9 +50,9 @@ def obtener_datos_supabase():
 # 4. Interfaz Visual
 st.title("🔍 Buscador inteligente de Licitaciones (PLACSP)")
 
-# Buscador principal
+# Buscador principal (ahora opcional)
 consulta_texto = st.text_input(
-    "¿Qué tipo de licitación buscas?",
+    "¿Qué tipo de licitación buscas? (Opcional)",
     placeholder="ej. mantenimiento informático, suministro de vehículos, obras..."
 )
 
@@ -69,9 +69,13 @@ with col3:
 with col4:
     filtro_fecha_cierre = st.text_input("⏳ Fecha fin (texto/parcial)", placeholder="ej. 2026-09")
 with col5:
-    limite_resultados = st.slider("Resultados", min_value=5, max_value=50, value=10)
+    limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10)
 
-# Intervalo de fecha de publicación opcional
+# Opción para mostrar todos los resultados posibles y control de fecha de publicación
+col_chk1, col_chk2 = st.columns([1, 3])
+with col_chk1:
+    mostrar_todos = st.checkbox("Mostrar TODOS los resultados")
+
 with st.expander("📅 Filtrar por intervalo de fecha de publicación"):
     usar_filtro_fechas = st.checkbox("Activar rango de fechas de publicación")
     col_f1, col_f2 = st.columns(2)
@@ -82,20 +86,18 @@ with st.expander("📅 Filtrar por intervalo de fecha de publicación"):
 
 btn_buscar = st.button("🔍 Buscar licitaciones", type="primary")
 
-# 5. Lógica de Búsqueda Semántica Real
+# 5. Lógica de Búsqueda y Filtrado
 if btn_buscar:
-    if not consulta_texto.strip():
-        st.warning("Por favor, introduce un término de búsqueda.")
-    else:
-        with st.spinner("Analizando similitud semántica con IA..."):
-            data = obtener_datos_supabase()
+    with st.spinner("Procesando licitaciones..."):
+        data = obtener_datos_supabase()
 
-            if not data:
-                st.info("No hay licitaciones en la base de datos de Supabase.")
-            else:
-                df = pd.DataFrame(data)
-                
-                # Verificar si existen embeddings guardados
+        if not data:
+            st.info("No hay licitaciones en la base de datos de Supabase.")
+        else:
+            df = pd.DataFrame(data)
+            
+            # Comprobar si el usuario introdujo temática para hacer búsqueda semántica o ordenar por fecha reciente
+            if consulta_texto.strip():
                 if "embedding" not in df.columns or df["embedding"].isnull().all():
                     st.error("⚠️ Los registros en Supabase no contienen vectores (embeddings). Vuelve a realizar la carga.")
                 else:
@@ -114,64 +116,70 @@ if btn_buscar:
 
                     # Ordenar de mayor a menor relevancia
                     df = df.sort_values(by="relevancia", ascending=False)
+            else:
+                # Si no introduce temática, por defecto se muestran las más recientes
+                df["relevancia"] = 100.0 # Valor neutro o informativo
+                if "fecha" in df.columns:
+                    df = df.sort_values(by="fecha", ascending=False)
 
-                    # --- APLICAR FILTROS ---
-                    if importe_min > 0:
-                        df = df[df["importe"] >= importe_min]
-                    if importe_max > 0:
-                        df = df[df["importe"] <= importe_max]
-                    
-                    if filtro_lugar.strip():
-                        df = df[df["lugar_ejecucion"].str.contains(filtro_lugar.strip(), case=False, na=False)]
-                    
-                    if filtro_fecha_cierre.strip():
-                        df = df[df["fecha_fin"].str.contains(filtro_fecha_cierre.strip(), case=False, na=False)]
+            # --- APLICAR FILTROS ---
+            if importe_min > 0:
+                df = df[df["importe"] >= importe_min]
+            if importe_max > 0:
+                df = df[df["importe"] <= importe_max]
+            
+            if filtro_lugar.strip():
+                df = df[df["lugar_ejecucion"].str.contains(filtro_lugar.strip(), case=False, na=False)]
+            
+            if filtro_fecha_cierre.strip():
+                df = df[df["fecha_fin"].str.contains(filtro_fecha_cierre.strip(), case=False, na=False)]
 
-                    if usar_filtro_fechas:
-                        def filtrar_fecha(f_str):
-                            if not f_str:
-                                return False
-                            try:
-                                obj_f = date.fromisoformat(f_str[:10])
-                                return f_inicio <= obj_f <= f_fin
-                            except ValueError:
-                                return False
-                        df = df[df["fecha"].apply(filtrar_fecha)]
+            if usar_filtro_fechas:
+                def filtrar_fecha(f_str):
+                    if not f_str:
+                        return False
+                    try:
+                        obj_f = date.fromisoformat(f_str[:10])
+                        return f_inicio <= obj_f <= f_fin
+                    except ValueError:
+                        return False
+                df = df[df["fecha"].apply(filtrar_fecha)]
 
-                    # Limitar al número de resultados seleccionados
-                    df = df.head(limite_resultados)
+            # Limitar al número de resultados seleccionados (si no marcó mostrar todos)
+            if not mostrar_todos:
+                df = df.head(limite_resultados)
 
-                    if df.empty:
-                        st.warning("No se encontraron resultados que cumplan con los filtros indicados.")
-                    else:
-                        st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
+            if df.empty:
+                st.warning("No se encontraron resultados que cumplan con los filtros indicados.")
+            else:
+                st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
 
-                        # Preparar la estructura de la tabla idéntica a la original pero añadiendo los nuevos campos
-                        tabla_final = []
-                        for idx, row in enumerate(df.itertuples(), start=1):
-                            tabla_final.append({
-                                "#": idx,
-                                "Relevancia (%)": row.relevancia,
-                                "Título": row.titulo,
-                                "Órgano": row.organo,
-                                "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
-                                "Cierre": getattr(row, "fecha_fin", "No especificada"),
-                                "Fecha Pub.": row.fecha,
-                                "Importe": f"{row.importe:,.2f} €",
-                                "Enlace": row.enlace
-                            })
+                # Preparar la estructura de la tabla idéntica a la original pero añadiendo los nuevos campos
+                tabla_final = []
+                for idx, row in enumerate(df.itertuples(), start=1):
+                    tabla_final.append({
+                        "#": idx,
+                        "Relevancia (%)": getattr(row, "relevancia", 100.0),
+                        "Título": row.titulo,
+                        "Órgano": row.organo,
+                        "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
+                        "Cierre": getattr(row, "fecha_fin", "No especificada"),
+                        "Fecha Pub.": row.fecha,
+                        "Importe": f"{row.importe:,.2f} €",
+                        "Enlace": row.enlace
+                    })
 
-                        df_final = pd.DataFrame(tabla_final)
+                df_final = pd.DataFrame(tabla_final)
 
-                        # Mostrar tabla interactiva con enlaces 100% clickeables
-                        st.dataframe(
-                            df_final,
-                            column_config={
-                                "Enlace": st.column_config.LinkColumn(
-                                    "Enlace oficial", 
-                                    display_text="Ver licitación 🔗"
-                                )
-                            },
-                            hide_index=True,
-                            use_container_width=True
+                # Mostrar tabla interactiva con enlaces 100% clickeables
+                st.dataframe(
+                    df_final,
+                    column_config={
+                        "Enlace": st.column_config.LinkColumn(
+                            "Enlace oficial", 
+                            display_text="Ver licitación 🔗"
                         )
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
