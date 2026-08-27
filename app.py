@@ -47,20 +47,12 @@ def obtener_datos_supabase():
     response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding").execute()
     return response.data
 
-# Mapa territorial ampliado con opciones generales y específicas (islas/provincias)
+# MAPA TERRITORIAL COMPLETO DE ESPAÑA (CCAA + Provincias / Islas desglosadas)
 MAPA_TERRITORIAL = {
-    "Todas las CCAA / Ubicaciones": [],
-    # --- CANARIAS Y SUS ISLAS/PROVINCIAS ---
-    "Canarias (General)": ["Canarias", "Tenerife", "Gran Canaria", "Lanzarote", "Fuerteventura", "La Palma", "La Gomera", "El Hierro", "Las Palmas", "Santa Cruz de Tenerife"],
-    "   ↳ La Gomera": ["La Gomera"],
-    "   ↳ Tenerife": ["Tenerife", "Santa Cruz de Tenerife"],
-    "   ↳ Gran Canaria": ["Gran Canaria", "Las Palmas"],
-    "   ↳ Lanzarote": ["Lanzarote"],
-    "   ↳ Fuerteventura": ["Fuerteventura"],
-    "   ↳ La Palma": ["La Palma"],
-    "   ↳ El Hierro": ["El Hierro"],
-    # --- RESTO DE CCAA Y PROVINCIAS ---
-    "Andalucía (General)": ["Andalucía", "Almería", "Cádiz", "Córdoba", "Granada", "Huelva", "Jaén", "Málaga", "Sevilla"],
+    "🌐 Todas las CCAA / Ubicaciones": [],
+    
+    # --- ANDALUCÍA ---
+    "📍 Andalucía (General)": ["Andalucía", "Almería", "Cádiz", "Córdoba", "Granada", "Huelva", "Jaén", "Málaga", "Sevilla"],
     "   ↳ Almería": ["Almería"],
     "   ↳ Cádiz": ["Cádiz"],
     "   ↳ Córdoba": ["Córdoba"],
@@ -69,23 +61,101 @@ MAPA_TERRITORIAL = {
     "   ↳ Jaén": ["Jaén"],
     "   ↳ Málaga": ["Málaga"],
     "   ↳ Sevilla": ["Sevilla"],
-    "Aragón": ["Aragón", "Huesca", "Teruel", "Zaragoza"],
-    "Asturias (Principado de)": ["Asturias", "Oviedo", "Gijón"],
-    "Illes Balears / Islas Baleares": ["Baleares", "Balears", "Mallorca", "Menorca", "Ibiza", "Formentera", "Palma"],
-    "Cantabria": ["Cantabria", "Santander"],
-    "Castilla-La Mancha": ["Castilla-La Mancha", "Albacete", "Ciudad Real", "Cuenca", "Guadalajara", "Toledo"],
-    "Castilla y León": ["Castilla y León", "Ávila", "Burgos", "León", "Palencia", "Salamanca", "Segovia", "Soria", "Valladolid", "Zamora"],
-    "Cataluña": ["Cataluña", "Catalunya", "Barcelona", "Gerona", "Girona", "Lérida", "Lleida", "Tarragona"],
-    "Comunitat Valenciana": ["Valenciana", "Valencia", "Alicante", "Castellón"],
-    "Extremadura": ["Extremadura", "Badajoz", "Cáceres"],
-    "Galicia": ["Galicia", "Coruña", "A Coruña", "Lugo", "Ourense", "Orense", "Pontevedra", "Vigo"],
-    "Madrid (Comunidad de)": ["Madrid"],
-    "Murcia (Región de)": ["Murcia"],
-    "Navarra (Comunidad Foral de)": ["Navarra", "Pamplona"],
-    "País Vasco": ["País Vasco", "Euskadi", "Álava", "Araba", "Guipúzcoa", "Gipuzkoa", "Vizcaya", "Bizkaia", "Bilbao", "San Sebastián", "Vitoria"],
-    "La Rioja": ["La Rioja", "Logroño"],
-    "Ceuta": ["Ceuta"],
-    "Melilla": ["Melilla"]
+
+    # --- ARAGÓN ---
+    "📍 Aragón (General)": ["Aragón", "Huesca", "Teruel", "Zaragoza"],
+    "   ↳ Huesca": ["Huesca"],
+    "   ↳ Teruel": ["Teruel"],
+    "   ↳ Zaragoza": ["Zaragoza"],
+
+    # --- ASTURIAS ---
+    "📍 Asturias (Principado de)": ["Asturias", "Oviedo", "Gijón", "Avilés"],
+
+    # --- BALEARES ---
+    "📍 Illes Balears / Islas Baleares (General)": ["Baleares", "Balears", "Mallorca", "Menorca", "Ibiza", "Formentera", "Palma"],
+    "   ↳ Mallorca / Palma": ["Mallorca", "Palma"],
+    "   ↳ Menorca": ["Menorca"],
+    "   ↳ Ibiza y Formentera": ["Ibiza", "Formentera"],
+
+    # --- CANARIAS ---
+    "📍 Canarias (General)": ["Canarias", "Tenerife", "Gran Canaria", "Lanzarote", "Fuerteventura", "La Palma", "La Gomera", "El Hierro", "Las Palmas", "Santa Cruz de Tenerife"],
+    "   ↳ Tenerife": ["Tenerife", "Santa Cruz de Tenerife"],
+    "   ↳ Gran Canaria": ["Gran Canaria", "Las Palmas"],
+    "   ↳ Lanzarote": ["Lanzarote"],
+    "   ↳ Fuerteventura": ["Fuerteventura"],
+    "   ↳ La Palma": ["La Palma"],
+    "   ↳ La Gomera": ["La Gomera"],
+    "   ↳ El Hierro": ["El Hierro"],
+
+    # --- CANTABRIA ---
+    "📍 Cantabria": ["Cantabria", "Santander"],
+
+    # --- CASTILLA-LA MANCHA ---
+    "📍 Castilla-La Mancha (General)": ["Castilla-La Mancha", "Albacete", "Ciudad Real", "Cuenca", "Guadalajara", "Toledo"],
+    "   ↳ Albacete": ["Albacete"],
+    "   ↳ Ciudad Real": ["Ciudad Real"],
+    "   ↳ Cuenca": ["Cuenca"],
+    "   ↳ Guadalajara": ["Guadalajara"],
+    "   ↳ Toledo": ["Toledo"],
+
+    # --- CASTILLA Y LEÓN ---
+    "📍 Castilla y León (General)": ["Castilla y León", "Ávila", "Burgos", "León", "Palencia", "Salamanca", "Segovia", "Soria", "Valladolid", "Zamora"],
+    "   ↳ Ávila": ["Ávila"],
+    "   ↳ Burgos": ["Burgos"],
+    "   ↳ León": ["León"],
+    "   ↳ Palencia": ["Palencia"],
+    "   ↳ Salamanca": ["Salamanca"],
+    "   ↳ Segovia": ["Segovia"],
+    "   ↳ Soria": ["Soria"],
+    "   ↳ Valladolid": ["Valladolid"],
+    "   ↳ Zamora": ["Zamora"],
+
+    # --- CATALUÑA ---
+    "📍 Cataluña / Catalunya (General)": ["Cataluña", "Catalunya", "Barcelona", "Gerona", "Girona", "Lérida", "Lleida", "Tarragona"],
+    "   ↳ Barcelona": ["Barcelona"],
+    "   ↳ Girona / Gerona": ["Gerona", "Girona"],
+    "   ↳ Lleida / Lérida": ["Lérida", "Lleida"],
+    "   ↳ Tarragona": ["Tarragona"],
+
+    # --- COMUNITAT VALENCIANA ---
+    "📍 Comunitat Valenciana (General)": ["Valenciana", "Valencia", "Alicante", "Castellón"],
+    "   ↳ Alicante / Alacant": ["Alicante"],
+    "   ↳ Castellón / Castelló": ["Castellón"],
+    "   ↳ Valencia / València": ["Valencia"],
+
+    # --- EXTREMADURA ---
+    "📍 Extremadura (General)": ["Extremadura", "Badajoz", "Cáceres"],
+    "   ↳ Badajoz": ["Badajoz"],
+    "   ↳ Cáceres": ["Cáceres"],
+
+    # --- GALICIA ---
+    "📍 Galicia (General)": ["Galicia", "Coruña", "A Coruña", "Lugo", "Ourense", "Orense", "Pontevedra", "Vigo"],
+    "   ↳ A Coruña / Coruña": ["Coruña", "A Coruña"],
+    "   ↳ Lugo": ["Lugo"],
+    "   ↳ Ourense / Orense": ["Ourense", "Orense"],
+    "   ↳ Pontevedra / Vigo": ["Pontevedra", "Vigo"],
+
+    # --- MADRID ---
+    "📍 Madrid (Comunidad de)": ["Madrid"],
+
+    # --- MURCIA ---
+    "📍 Murcia (Región de)": ["Murcia"],
+
+    # --- NAVARRA ---
+    "📍 Navarra (Comunidad Foral de)": ["Navarra", "Pamplona"],
+
+    # --- PAÍS VASCO ---
+    "📍 País Vasco / Euskadi (General)": ["País Vasco", "Euskadi", "Álava", "Araba", "Guipúzcoa", "Gipuzkoa", "Vizcaya", "Bizkaia", "Bilbao", "San Sebastián", "Vitoria"],
+    "   ↳ Álava / Araba": ["Álava", "Araba", "Vitoria"],
+    "   ↳ Guipúzcoa / Gipuzkoa": ["Guipúzcoa", "Gipuzkoa", "San Sebastián"],
+    "   ↳ Vizcaya / Bizkaia": ["Vizcaya", "Bizkaia", "Bilbao"],
+
+    # --- LA RIOJA ---
+    "📍 La Rioja": ["La Rioja", "Logroño"],
+
+    # --- CIUDADES AUTÓNOMAS ---
+    "📍 Ceuta": ["Ceuta"],
+    "📍 Melilla": ["Melilla"]
 }
 
 # 4. Interfaz Visual y Gestión de Estado
@@ -93,7 +163,7 @@ st.title("🔍 Buscador inteligente de Licitaciones (PLACSP)")
 
 def limpiar_campos():
     st.session_state.consulta_texto = ""
-    st.session_state.filtro_ccaa = "Todas las CCAA / Ubicaciones"
+    st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_fecha_cierre = ""
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
@@ -117,9 +187,9 @@ with col1:
 with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
-    # Desplegable con opciones generales y específicas (ej. Canarias o directamente La Gomera)
+    # Desplegable completo con CCAA generales e islas/provincias desglosadas
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox("📍 Lugar (CCAA / Isla)", lista_ccaa, key="filtro_ccaa")
+    filtro_ccaa = st.selectbox("📍 Lugar de ejecución", lista_ccaa, key="filtro_ccaa")
 with col4:
     filtro_fecha_cierre = st.text_input("⏳ Fecha fin (texto/parcial)", placeholder="ej. 2026-09", key="filtro_fecha_cierre")
 with col5:
@@ -180,7 +250,7 @@ if btn_buscar:
                 df = df[df["importe"] <= importe_max]
             
             # Filtro inteligente por CCAA o isla específica seleccionada
-            if filtro_ccaa != "Todas las CCAA / Ubicaciones":
+            if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
                 patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
                 df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False)]
