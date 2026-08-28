@@ -1,7 +1,7 @@
-import os 
+import os
 import requests
 import lxml.etree as ET
-from datetime import datetime
+from datetime import datetime, date
 from supabase import create_client, Client
 from sentence_transformers import SentenceTransformer
 
@@ -83,7 +83,8 @@ def _texto(el, xpath, ns=NS):
     return nodo.text.strip() if nodo is not None and nodo.text else None
 
 def sincronizar():
-    print("🔄 Iniciando sincronización avanzada de feeds ATOM...")
+    print("🔄 Iniciando sincronización avanzada de feeds ATOM con filtro de vigencia...")
+    hoy = date.today()
     
     for fuente in FUENTES_ATOM:
         print(f"📥 Leyendo fuente: {fuente['nombre']}...")
@@ -107,8 +108,21 @@ def sincronizar():
             entries = root.findall('.//{http://www.w3.org/2005/Atom}entry')
 
         print(f"Procesando {len(entries)} entradas de {fuente['nombre']}...")
+        omitidas_por_fecha = 0
 
         for entry in entries:
+            # --- FILTRO DE FECHA: Descartar si ya ha expirado la presentación ---
+            try:
+                end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
+                if end_date_el is not None and end_date_el.text:
+                    texto_fecha_fin = end_date_el.text.strip()[:10]
+                    fecha_fin_obj = datetime.strptime(texto_fecha_fin, "%Y-%m-%d").date()
+                    if fecha_fin_obj < hoy:
+                        omitidas_por_fecha += 1
+                        continue
+            except Exception:
+                pass
+
             titulo = _texto(entry, "atom:title") or "Sin título"
             
             # Extracción del enlace
@@ -123,18 +137,17 @@ def sincronizar():
 
             # Fechas
             txt_fecha = _texto(entry, "atom:updated") or _texto(entry, "atom:published")
-            fecha = txt_fecha.split("T")[0] if txt_fecha else str(datetime.now().date())[:10]
+            fecha = txt_fecha.split("T")[0] if txt_fecha else str(hoy)
 
-            # --- Fecha fin de presentación de oferta ---
+            # Fecha fin de presentación limpia para guardar
             fecha_fin = "No especificada"
             try:
-                end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
                 if end_date_el is not None and end_date_el.text:
                     fecha_fin = end_date_el.text.strip()
             except Exception:
                 pass
 
-            # --- Lugar de ejecución (con traducción automática de códigos NUTS) ---
+            # --- Lugar de ejecución ---
             lugar_ejecucion = "No especificado"
             try:
                 lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentity", NS)
@@ -148,7 +161,7 @@ def sincronizar():
             except Exception:
                 pass
 
-            # --- Importe (Búsqueda robusta en cascada) ---
+            # --- Importe ---
             importe = 0.0
             try:
                 presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS)
@@ -204,7 +217,6 @@ def sincronizar():
             resp = supabase.table("licitaciones").select("id, enlace").eq("enlace", enlace).execute()
 
             if not resp.data:
-                # --- CASO 1: NUEVA LICITACIÓN ---
                 vector = encoder.encode(texto_evaluacion).tolist()
                 nuevo_registro = {
                     "titulo": titulo.strip(),
@@ -220,7 +232,6 @@ def sincronizar():
                 supabase.table("licitaciones").insert(nuevo_registro).execute()
                 print(f"➕ Nueva añadida: {titulo[:30]}... ({importe}€)")
             else:
-                # --- CASO 2: ACTUALIZACIÓN DE LICITACIÓN YA EXISTENTE ---
                 vector = encoder.encode(texto_evaluacion).tolist()
                 datos_actualizados = {
                     "titulo": titulo.strip(),
@@ -235,7 +246,9 @@ def sincronizar():
                 supabase.table("licitaciones").update(datos_actualizados).eq("enlace", enlace).execute()
                 print(f"🔄 Actualizada: {titulo[:30]}... ({importe}€)")
 
-    print("✅ Sincronización ATOM avanzada completada con éxito.")
+        print(f"ℹ️ Omitidas {omitidas_por_fecha} licitaciones por estar caducadas en {fuente['nombre']}.")
+
+    print("✅ Sincronización ATOM avanzada con filtro completada con éxito.")
 
 if __name__ == "__main__":
     sincronizar()
