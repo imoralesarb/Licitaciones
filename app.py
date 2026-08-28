@@ -187,13 +187,13 @@ MAPA_TERRITORIAL = {
 # MAPA DE SECTORES CPV OFICIALES
 SECTORES_CPV = {
     "🌐 Todos los sectores CPV": [],
-    "Agricultura, alimentación y materias primas": ["03", "09", "14", "15", "16"],
-    "Textil, industria, maquinaria y bienes de consumo": ["18", "19", "22", "24", "30", "31", "32", "33", "34", "35", "37", "38", "39"],
-    "Construcción, agua y energía": ["41", "42", "43", "44", "45", "48"],
-    "Servicios generales a empresas y mantenimiento": ["50", "51", "55"],
-    "Transporte, correos y telecomunicaciones": ["60", "63", "64", "65"],
-    "Servicios financieros, inmobiliarios y profesionales": ["66", "70", "71", "72", "73", "75", "76", "77", "79"],
-    "Educación, sanidad, medio ambiente y servicios sociales": ["80", "85", "90", "92", "98"]
+    "Agricultura, alimentación y materias primas (Div. 03-16)": ["03", "09", "14", "15", "16"],
+    "Textil, industria, maquinaria y bienes de consumo (Div. 18-39)": ["18", "19", "22", "24", "30", "31", "32", "33", "34", "35", "37", "38", "39"],
+    "Construcción, agua y energía (Div. 41-48)": ["41", "42", "43", "44", "45", "48"],
+    "Servicios generales a empresas y mantenimiento (Div. 50-55)": ["50", "51", "55"],
+    "Transporte, correos y telecomunicaciones (Div. 60-65)": ["60", "63", "64", "65"],
+    "Servicios financieros, inmobiliarios y profesionales (Div. 66-79)": ["66", "70", "71", "72", "73", "75", "76", "77", "79"],
+    "Educación, sanidad, medio ambiente y servicios sociales (Div. 80-98)": ["80", "85", "90", "92", "98"]
 }
 
 # 4. Interfaz Visual y Gestión de Estado
@@ -229,9 +229,9 @@ with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox("📍 Ubicación", lista_ccaa, key="filtro_ccaa")
+    filtro_ccaa = st.selectbox("📍  Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    filtro_lugar_libre = st.text_input("📍 Lugar (Libre)", placeholder="ej. San Sebastián", key="filtro_lugar_libre")
+    filtro_lugar_libre = st.text_input("📍 Lugar de ejecución (Libre)", placeholder="ej. San Sebastián", key="filtro_lugar_libre")
 with col5:
     lista_sectores = list(SECTORES_CPV.keys())
     filtro_cpv_sector = st.selectbox("📦 Sector CPV", lista_sectores, key="filtro_cpv_sector")
