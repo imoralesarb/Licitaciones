@@ -218,7 +218,7 @@ consulta_texto = st.text_input(
     key="consulta_texto"
 )
 
-# Panel de filtros integrados en la misma vista (añadiendo la columna faltante de lugar libre)
+# Panel de filtros integrados en la misma vista
 st.markdown("### ⚙️ Filtros avanzados")
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
@@ -369,7 +369,6 @@ if btn_buscar:
                         "Título": row.titulo,
                         "Órgano": row.organo,
                         "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
-                        "CPV": getattr(row, "cpv", "No especificado"),
                         "Cierre": getattr(row, "fecha_fin", "No especificada"),
                         "Fecha Pub.": row.fecha,
                         "Importe": f"{row.importe:,.2f} €",
