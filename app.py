@@ -219,9 +219,9 @@ consulta_texto = st.text_input(
     key="consulta_texto"
 )
 
-# Panel de filtros avanzados (ampliado a 7 columnas para alojar el campo de código CPV)
+# Panel de filtros avanzados (organizados en dos filas)
 st.markdown("### ⚙️ Filtros avanzados")
-col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
@@ -232,6 +232,8 @@ with col3:
     filtro_ccaa = st.selectbox("📍  Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
     filtro_lugar_libre = st.text_input("📍 Lugar de ejecución (Libre)", placeholder="ej. San Sebastián", key="filtro_lugar_libre")
+
+col5, col6, col7 = st.columns(3)
 with col5:
     lista_sectores = list(SECTORES_CPV.keys())
     filtro_cpv_sector = st.selectbox("📦 Sector CPV", lista_sectores, key="filtro_cpv_sector")
@@ -351,8 +353,8 @@ if btn_buscar:
                         return obj_f >= fecha_cierre_tope
                     except ValueError:
                         return False
-                if "fecha_fin" in df.columns:
-                    df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
+                    if "fecha_fin" in df.columns:
+                        df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
 
             # Filtro de rango de fecha de publicación
             if not df.empty and usar_filtro_fechas:
