@@ -70,7 +70,7 @@ with st.spinner("Cargando modelo de IA..."):
 # 3. Descargar datos de Supabase incluyendo los nuevos campos para filtros
 @st.cache_data(ttl=600)
 def obtener_datos_supabase():
-    response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding").execute()
+    response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding, cpv").execute()
     return response.data
 
 # MAPA TERRITORIAL COMPLETO DE ESPAÑA
@@ -79,87 +79,87 @@ MAPA_TERRITORIAL = {
     
     # --- ANDALUCÍA ---
     "📍 Andalucía (General)": ["Andalucía", "Almería", "Cádiz", "Córdoba", "Granada", "Huelva", "Jaén", "Málaga", "Sevilla"],
-    "   ↳ Almería": ["Almería"],
-    "   ↳ Cádiz": ["Cádiz"],
-    "   ↳ Córdoba": ["Córdoba"],
-    "   ↳ Granada": ["Granada"],
-    "   ↳ Huelva": ["Huelva"],
-    "   ↳ Jaén": ["Jaén"],
-    "   ↳ Málaga": ["Málaga"],
-    "   ↳ Sevilla": ["Sevilla"],
+    "    ↳ Almería": ["Almería"],
+    "    ↳ Cádiz": ["Cádiz"],
+    "    ↳ Córdoba": ["Córdoba"],
+    "    ↳ Granada": ["Granada"],
+    "    ↳ Huelva": ["Huelva"],
+    "    ↳ Jaén": ["Jaén"],
+    "    ↳ Málaga": ["Málaga"],
+    "    ↳ Sevilla": ["Sevilla"],
 
     # --- ARAGÓN ---
     "📍 Aragón (General)": ["Aragón", "Huesca", "Teruel", "Zaragoza"],
-    "   ↳ Huesca": ["Huesca"],
-    "   ↳ Teruel": ["Teruel"],
-    "   ↳ Zaragoza": ["Zaragoza"],
+    "    ↳ Huesca": ["Huesca"],
+    "    ↳ Teruel": ["Teruel"],
+    "    ↳ Zaragoza": ["Zaragoza"],
 
     # --- ASTURIAS ---
     "📍 Asturias (Principado de)": ["Asturias", "Oviedo", "Gijón", "Avilés"],
 
     # --- BALEARES ---
     "📍 Illes Balears / Islas Baleares (General)": ["Baleares", "Balears", "Mallorca", "Menorca", "Ibiza", "Formentera", "Palma"],
-    "   ↳ Mallorca / Palma": ["Mallorca", "Palma"],
-    "   ↳ Menorca": ["Menorca"],
-    "   ↳ Ibiza y Formentera": ["Ibiza", "Formentera"],
+    "    ↳ Mallorca / Palma": ["Mallorca", "Palma"],
+    "    ↳ Menorca": ["Menorca"],
+    "    ↳ Ibiza y Formentera": ["Ibiza", "Formentera"],
 
     # --- CANARIAS ---
     "📍 Canarias (General)": ["Canarias", "Tenerife", "Gran Canaria", "Lanzarote", "Fuerteventura", "La Palma", "La Gomera", "El Hierro", "Las Palmas", "Santa Cruz de Tenerife"],
-    "   ↳ Tenerife": ["Tenerife", "Santa Cruz de Tenerife"],
-    "   ↳ Gran Canaria": ["Gran Canaria", "Las Palmas"],
-    "   ↳ Lanzarote": ["Lanzarote"],
-    "   ↳ Fuerteventura": ["Fuerteventura"],
-    "   ↳ La Palma": ["La Palma"],
-    "   ↳ La Gomera": ["La Gomera"],
-    "   ↳ El Hierro": ["El Hierro"],
+    "    ↳ Tenerife": ["Tenerife", "Santa Cruz de Tenerife"],
+    "    ↳ Gran Canaria": ["Gran Canaria", "Las Palmas"],
+    "    ↳ Lanzarote": ["Lanzarote"],
+    "    ↳ Fuerteventura": ["Fuerteventura"],
+    "    ↳ La Palma": ["La Palma"],
+    "    ↳ La Gomera": ["La Gomera"],
+    "    ↳ El Hierro": ["El Hierro"],
 
     # --- CANTABRIA ---
     "📍 Cantabria": ["Cantabria", "Santander"],
 
     # --- CASTILLA-LA MANCHA ---
     "📍 Castilla-La Mancha (General)": ["Castilla-La Mancha", "Albacete", "Ciudad Real", "Cuenca", "Guadalajara", "Toledo"],
-    "   ↳ Albacete": ["Albacete"],
-    "   ↳ Ciudad Real": ["Ciudad Real"],
-    "   ↳ Cuenca": ["Cuenca"],
-    "   ↳ Guadalajara": ["Guadalajara"],
-    "   ↳ Toledo": ["Toledo"],
+    "    ↳ Albacete": ["Albacete"],
+    "    ↳ Ciudad Real": ["Ciudad Real"],
+    "    ↳ Cuenca": ["Cuenca"],
+    "    ↳ Guadalajara": ["Guadalajara"],
+    "    ↳ Toledo": ["Toledo"],
 
     # --- CASTILLA Y LEÓN ---
     "📍 Castilla y León (General)": ["Castilla y León", "Ávila", "Burgos", "León", "Palencia", "Salamanca", "Segovia", "Soria", "Valladolid", "Zamora"],
-    "   ↳ Ávila": ["Ávila"],
-    "   ↳ Burgos": ["Burgos"],
-    "   ↳ León": ["León"],
-    "   ↳ Palencia": ["Palencia"],
-    "   ↳ Salamanca": ["Salamanca"],
-    "   ↳ Segovia": ["Segovia"],
-    "   ↳ Soria": ["Soria"],
-    "   ↳ Valladolid": ["Valladolid"],
-    "   ↳ Zamora": ["Zamora"],
+    "    ↳ Ávila": ["Ávila"],
+    "    ↳ Burgos": ["Burgos"],
+    "    ↳ León": ["León"],
+    "    ↳ Palencia": ["Palencia"],
+    "    ↳ Salamanca": ["Salamanca"],
+    "    ↳ Segovia": ["Segovia"],
+    "    ↳ Soria": ["Soria"],
+    "    ↳ Valladolid": ["Valladolid"],
+    "    ↳ Zamora": ["Zamora"],
 
     # --- CATALUÑA ---
     "📍 Cataluña / Catalunya (General)": ["Cataluña", "Catalunya", "Barcelona", "Gerona", "Girona", "Lérida", "Lleida", "Tarragona"],
-    "   ↳ Barcelona": ["Barcelona"],
-    "   ↳ Girona / Gerona": ["Gerona", "Girona"],
-    "   ↳ Lleida / Lérida": ["Lérida", "Lleida"],
-    "   ↳ Tarragona": ["Tarragona"],
+    "    ↳ Barcelona": ["Barcelona"],
+    "    ↳ Girona / Gerona": ["Gerona", "Girona"],
+    "    ↳ Lleida / Lérida": ["Lérida", "Lleida"],
+    "    ↳ Tarragona": ["Tarragona"],
 
     # --- COMUNITAT VALENCIANA ---
     "📍 Comunitat Valenciana (General)": ["Valenciana", "Valencia", "Alicante", "Castellón"],
-    "   ↳ Alicante / Alacant": ["Alicante"],
-    "   ↳ Castellón / Castelló": ["Castellón"],
-    "   ↳ Valencia / València": ["Valencia"],
+    "    ↳ Alicante / Alacant": ["Alicante"],
+    "    ↳ Castellón / Castelló": ["Castellón"],
+    "    ↳ Valencia / València": ["Valencia"],
 
     # --- EXTREMADURA ---
     "📍 Extremadura (General)": ["Extremadura", "Badajoz", "Cáceres"],
-    "   ↳ Badajoz": ["Badajoz"],
-    "   ↳ Cáceres": ["Cáceres"],
+    "    ↳ Badajoz": ["Badajoz"],
+    "    ↳ Cáceres": ["Cáceres"],
 
     # --- GALICIA ---
     "📍 Galicia (General)": ["Galicia", "Coruña", "A Coruña", "Lugo", "Ourense", "Orense", "Pontevedra", "Vigo"],
-    "   ↳ A Coruña / Coruña": ["Coruña", "A Coruña"],
-    "   ↳ Lugo": ["Lugo"],
-    "   ↳ Ourense / Orense": ["Ourense", "Orense"],
-    "   ↳ Pontevedra / Vigo": ["Pontevedra", "Vigo"],
+    "    ↳ A Coruña / Coruña": ["Coruña", "A Coruña"],
+    "    ↳ Lugo": ["Lugo"],
+    "    ↳ Ourense / Orense": ["Ourense", "Orense"],
+    "    ↳ Pontevedra / Vigo": ["Pontevedra", "Vigo"],
 
     # --- MADRID ---
     "📍 Madrid (Comunidad de)": ["Madrid"],
@@ -172,9 +172,9 @@ MAPA_TERRITORIAL = {
 
     # --- PAÍS VASCO ---
     "📍 País Vasco / Euskadi (General)": ["País Vasco", "Euskadi", "Álava", "Araba", "Guipúzcoa", "Gipuzkoa", "Vizcaya", "Bizkaia", "Bilbao", "San Sebastián", "Vitoria"],
-    "   ↳ Álava / Araba": ["Álava", "Araba", "Vitoria"],
-    "   ↳ Guipúzcoa / Gipuzkoa": ["Guipúzcoa", "Gipuzkoa", "San Sebastián"],
-    "   ↳ Vizcaya / Bizkaia": ["Vizcaya", "Bizkaia", "Bilbao"],
+    "    ↳ Álava / Araba": ["Álava", "Araba", "Vitoria"],
+    "    ↳ Guipúzcoa / Gipuzkoa": ["Guipúzcoa", "Gipuzkoa", "San Sebastián"],
+    "    ↳ Vizcaya / Bizkaia": ["Vizcaya", "Bizkaia", "Bilbao"],
 
     # --- LA RIOJA ---
     "📍 La Rioja": ["La Rioja", "Logroño"],
@@ -184,6 +184,18 @@ MAPA_TERRITORIAL = {
     "📍 Melilla": ["Melilla"]
 }
 
+# MAPA DE SECTORES CPV OFICIALES
+SECTORES_CPV = {
+    "🌐 Todos los sectores CPV": [],
+    "Agricultura, alimentación y materias primas": ["03", "09", "14", "15", "16"],
+    "Textil, industria, maquinaria y bienes de consumo": ["18", "19", "22", "24", "30", "31", "32", "33", "34", "35", "37", "38", "39"],
+    "Construcción, agua y energía": ["41", "42", "43", "44", "45", "48"],
+    "Servicios generales a empresas y mantenimiento": ["50", "51", "55"],
+    "Transporte, correos y telecomunicaciones": ["60", "63", "64", "65"],
+    "Servicios financieros, inmobiliarios y profesionales": ["66", "70", "71", "72", "73", "75", "76", "77", "79"],
+    "Educación, sanidad, medio ambiente y servicios sociales": ["80", "85", "90", "92", "98"]
+}
+
 # 4. Interfaz Visual y Gestión de Estado
 st.title("🔍 Buscador inteligente de Licitaciones")
 
@@ -191,6 +203,7 @@ def limpiar_campos():
     st.session_state.consulta_texto = ""
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_lugar_libre = ""
+    st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
     st.session_state.limite_resultados = 10
@@ -217,7 +230,8 @@ with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
     filtro_ccaa = st.selectbox("📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    filtro_lugar_libre = st.text_input("📍 Lugar de ejecución (Libre)", placeholder="ej. San Sebastián de la Gomera", key="filtro_lugar_libre")
+    lista_sectores = list(SECTORES_CPV.keys())
+    filtro_cpv_sector = st.selectbox("📦 Sector de actividad (CPV)", lista_sectores, key="filtro_cpv_sector")
 with col5:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
@@ -296,9 +310,15 @@ if btn_buscar:
                 patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
                 df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False)]
             
-            # Filtro adicional por texto libre de lugar específico
-            if filtro_lugar_libre.strip():
-                df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
+            # Filtro por desplegable de Sector CPV
+            if filtro_cpv_sector != "🌐 Todos los sectores CPV":
+                prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
+                def coincide_cpv(cpv_str):
+                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                        return False
+                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+                    return any(c.startswith(prefijos_validos) for c in lista_cpv)
+                df = df[df["cpv"].apply(coincide_cpv)]
             
             # Filtro inteligente de fecha fin (mantiene las que expiren en la fecha seleccionada o más adelante)
             if usar_filtro_cierre:
@@ -340,6 +360,7 @@ if btn_buscar:
                         "Título": row.titulo,
                         "Órgano": row.organo,
                         "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
+                        "CPV": getattr(row, "cpv", "No especificado"),
                         "Cierre": getattr(row, "fecha_fin", "No especificada"),
                         "Fecha Pub.": row.fecha,
                         "Importe": f"{row.importe:,.2f} €",
