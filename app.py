@@ -314,8 +314,21 @@ if btn_buscar:
             # Filtro por desplegable territorial
             if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
-                patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
-                df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False)]
+                
+                # Excepción controlada: si filtramos por Baleares, evitamos que coincida "Palma" si va precedida de "La"
+                if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
+                    patrones = []
+                    for p in palabras_clave:
+                        if p == "Palma":
+                            # Regex que busca "Palma" pero excluye "La Palma"
+                            patrones.append(r'(?<![Ll][Aa]\s)\bPalma\b')
+                        else:
+                            patrones.append(r'\b' + p + r'\b')
+                    patron_regex = '|'.join(patrones)
+                else:
+                    patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
+                    
+                df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False, regex=True)]
             
             # Filtro adicional por texto libre de lugar específico
             if not df.empty and filtro_lugar_libre.strip():
