@@ -204,6 +204,7 @@ def limpiar_campos():
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_lugar_libre = ""
     st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
+    st.session_state.filtro_cpv_codigo = ""
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
     st.session_state.limite_resultados = 10
@@ -218,9 +219,9 @@ consulta_texto = st.text_input(
     key="consulta_texto"
 )
 
-# Panel de filtros integrados en la misma vista
+# Panel de filtros avanzados (ampliado a 7 columnas para alojar el campo de código CPV)
 st.markdown("### ⚙️ Filtros avanzados")
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
@@ -228,13 +229,15 @@ with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox("📍 Ubicación (Desplegable)", lista_ccaa, key="filtro_ccaa")
+    filtro_ccaa = st.selectbox("📍 Ubicación", lista_ccaa, key="filtro_ccaa")
 with col4:
     filtro_lugar_libre = st.text_input("📍 Lugar (Libre)", placeholder="ej. San Sebastián", key="filtro_lugar_libre")
 with col5:
     lista_sectores = list(SECTORES_CPV.keys())
     filtro_cpv_sector = st.selectbox("📦 Sector CPV", lista_sectores, key="filtro_cpv_sector")
 with col6:
+    filtro_cpv_codigo = st.text_input("🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo")
+with col7:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
 # Controles secundarios y calendarios de fechas
@@ -326,6 +329,17 @@ if btn_buscar:
                     return any(c.startswith(prefijos_validos) for c in lista_cpv)
                 if "cpv" in df.columns:
                     df = df[df["cpv"].apply(coincide_cpv)]
+
+            # Filtro por código CPV específico o aproximado introducido por texto
+            if not df.empty and filtro_cpv_codigo.strip():
+                codigo_busqueda = filtro_cpv_codigo.strip()
+                def coincide_codigo_cpv(cpv_str):
+                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                        return False
+                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+                    return any(codigo_busqueda in c for c in lista_cpv)
+                if "cpv" in df.columns:
+                    df = df[df["cpv"].apply(coincide_codigo_cpv)]
             
             # Filtro inteligente de fecha fin (mantiene las que expiren en la fecha seleccionada o más adelante)
             if not df.empty and usar_filtro_cierre:
