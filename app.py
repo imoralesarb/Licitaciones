@@ -218,9 +218,9 @@ consulta_texto = st.text_input(
     key="consulta_texto"
 )
 
-# Panel de filtros integrados en la misma vista
+# Panel de filtros integrados en la misma vista (añadiendo la columna faltante de lugar libre)
 st.markdown("### ⚙️ Filtros avanzados")
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
@@ -228,11 +228,13 @@ with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox("📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa")
+    filtro_ccaa = st.selectbox("📍 Ubicación (Desplegable)", lista_ccaa, key="filtro_ccaa")
 with col4:
-    lista_sectores = list(SECTORES_CPV.keys())
-    filtro_cpv_sector = st.selectbox("📦 Sector de actividad (CPV)", lista_sectores, key="filtro_cpv_sector")
+    filtro_lugar_libre = st.text_input("📍 Lugar (Libre)", placeholder="ej. San Sebastián", key="filtro_lugar_libre")
 with col5:
+    lista_sectores = list(SECTORES_CPV.keys())
+    filtro_cpv_sector = st.selectbox("📦 Sector CPV", lista_sectores, key="filtro_cpv_sector")
+with col6:
     limite_resultados = st.slider("Resultados", min_value=1, max_value=500, value=10, key="limite_resultados")
 
 # Controles secundarios y calendarios de fechas
@@ -299,29 +301,34 @@ if btn_buscar:
                     df = df.sort_values(by="fecha", ascending=False)
 
             # --- APLICAR FILTROS ---
-            if importe_min > 0:
+            if not df.empty and importe_min > 0:
                 df = df[df["importe"] >= importe_min]
-            if importe_max > 0:
+            if not df.empty and importe_max > 0:
                 df = df[df["importe"] <= importe_max]
             
             # Filtro por desplegable territorial
-            if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
+            if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
                 patron_regex = '|'.join([r'\b' + p + r'\b' for p in palabras_clave])
                 df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False)]
             
+            # Filtro adicional por texto libre de lugar específico
+            if not df.empty and filtro_lugar_libre.strip():
+                df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
+
             # Filtro por desplegable de Sector CPV
-            if filtro_cpv_sector != "🌐 Todos los sectores CPV":
+            if not df.empty and filtro_cpv_sector != "🌐 Todos los sectores CPV":
                 prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
                 def coincide_cpv(cpv_str):
                     if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
                         return False
                     lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
                     return any(c.startswith(prefijos_validos) for c in lista_cpv)
-                df = df[df["cpv"].apply(coincide_cpv)]
+                if "cpv" in df.columns:
+                    df = df[df["cpv"].apply(coincide_cpv)]
             
             # Filtro inteligente de fecha fin (mantiene las que expiren en la fecha seleccionada o más adelante)
-            if usar_filtro_cierre:
+            if not df.empty and usar_filtro_cierre:
                 def filtrar_fecha_fin(f_str):
                     if not f_str:
                         return False
@@ -330,10 +337,11 @@ if btn_buscar:
                         return obj_f >= fecha_cierre_tope
                     except ValueError:
                         return False
-                df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
+                if "fecha_fin" in df.columns:
+                    df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
 
             # Filtro de rango de fecha de publicación
-            if usar_filtro_fechas:
+            if not df.empty and usar_filtro_fechas:
                 def filtrar_fecha_pub(f_str):
                     if not f_str:
                         return False
@@ -342,9 +350,10 @@ if btn_buscar:
                         return f_inicio <= obj_f <= f_fin
                     except ValueError:
                         return False
-                df = df[df["fecha"].apply(filtrar_fecha_pub)]
+                if "fecha" in df.columns:
+                    df = df[df["fecha"].apply(filtrar_fecha_pub)]
 
-            if not mostrar_todos:
+            if not df.empty and not mostrar_todos:
                 df = df.head(limite_resultados)
 
             if df.empty:
