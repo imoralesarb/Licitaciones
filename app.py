@@ -2,7 +2,7 @@ from datetime import date
 import os
 import pandas as pd
 import streamlit as st
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
 from supabase import Client, create_client
 
 # Desactivar traductor automático del navegador
@@ -59,7 +59,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# 2. Cargar modelo de IA en caché
+# 2. Cargar modelo de IA en caché (solo codifica el texto de búsqueda)
 @st.cache_resource
 def cargar_modelo():
   return SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
@@ -69,9 +69,9 @@ with st.spinner("Cargando modelo de IA..."):
   encoder = cargar_modelo()
 
 
-# 3. Descargar datos de Supabase sin límite de 1000 registros
+# 3. Descarga auxiliar optimizada solo para el botón de Novedades
 @st.cache_data(ttl=600)
-def obtener_datos_supabase():
+def obtener_novedades_supabase():
   todos_los_datos = []
   tamano_lote = 1000
   inicio = 0
@@ -81,7 +81,7 @@ def obtener_datos_supabase():
         supabase.table("licitaciones")
         .select(
             "titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin,"
-            " texto_completo, embedding, cpv, es_novedad, es_actualizada"
+            " cpv, es_novedad, es_actualizada"
         )
         .range(inicio, inicio + tamano_lote - 1)
         .execute()
@@ -92,10 +92,8 @@ def obtener_datos_supabase():
       break
 
     todos_los_datos.extend(filas)
-
     if len(filas) < tamano_lote:
       break
-
     inicio += tamano_lote
 
   return todos_los_datos
@@ -415,7 +413,7 @@ if usar_filtro_cierre:
 
 st.write("")
 
-# --- BOTONES DE ACCIÓN PRINCIPAL (AÑADIDO EL TERCER BOTÓN DE NOVEDADES) ---
+# --- BOTONES DE ACCIÓN PRINCIPAL ---
 col_btn_buscar, col_btn_novedades, col_btn_limpiar = st.columns([2, 2, 2])
 
 with col_btn_buscar:
@@ -444,23 +442,22 @@ def estilizar_filas(row):
   if row.get("Es Novedad", False):
     return [
         "background-color: #d4edda; color: #155724; font-weight: bold;"
-    ] * len(row)  # Verde suave
+    ] * len(row)
   elif row.get("Es Actualizada", False):
     return [
         "background-color: #cce5ff; color: #004085; font-weight: bold;"
-    ] * len(row)  # Azul suave
+    ] * len(row)
   return [""] * len(row)
 
 
 # 5. Lógica del Botón de Novedades
 if btn_novedades:
   with st.spinner("Cargando novedades y actualizaciones..."):
-    data = obtener_datos_supabase()
+    data = obtener_novedades_supabase()
     if not data:
       st.info("No hay datos en Supabase.")
     else:
       df = pd.DataFrame(data)
-      # Filtrar estrictamente las que sean novedad o estén actualizadas
       df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
 
       if df.empty:
@@ -490,7 +487,6 @@ if btn_novedades:
           })
 
         df_final = pd.DataFrame(tabla_final)
-        df_mostrar = df_final.drop(columns=["Es Novedad", "Es Actualizada"])
 
         st.dataframe(
             df_final.style.apply(estilizar_filas, axis=1),
@@ -503,41 +499,62 @@ if btn_novedades:
             use_container_width=True,
         )
 
-# 6. Lógica de Búsqueda y Filtrado Principal
+# 6. Lógica de Búsqueda Principal vía Supabase RPC (Optimizado sin bloquear CPU)
 elif btn_buscar:
-  with st.spinner("Procesando licitaciones..."):
-    data = obtener_datos_supabase()
+  with st.spinner("Buscando en Supabase..."):
+    resultados = []
 
-    if not data:
-      st.info("No hay licitaciones en la base de datos de Supabase.")
+    if consulta_texto.strip():
+      # Búsqueda Semántica Optimizada en Base de Datos (Vectorial)
+      query_con_prefijo = f"query: {consulta_texto.strip()}"
+      vector_query = encoder.encode(query_con_prefijo).tolist()
+
+      try:
+        response = supabase.rpc(
+            "buscar_licitaciones",
+            {
+                "query_embedding": vector_query,
+                "match_threshold": 0.3,
+                "match_count": 500
+                if mostrar_todos
+                else max(limite_resultados * 3, 50),
+            },
+        ).execute()
+        resultados = response.data
+      except Exception as e:
+        st.error(
+            "⚠️ Error al ejecutar la búsqueda vectorial en Supabase."
+            f" Asegúrate de haber creado la función RPC correctamente. Detalle: {e}"
+        )
     else:
-      df = pd.DataFrame(data)
-
-      if consulta_texto.strip():
-        if "embedding" not in df.columns or df["embedding"].isnull().all():
-          st.error(
-              "⚠️ Los registros en Supabase no contienen vectores (embeddings)."
-              " Vuelve a realizar la carga."
+      # Si no hay texto de búsqueda, traemos los registros más recientes
+      response = (
+          supabase.table("licitaciones")
+          .select(
+              "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
+              " fecha_fin, texto_completo, cpv, es_novedad, es_actualizada"
           )
-        else:
-          query_con_prefijo = f"query: {consulta_texto.strip()}"
-          vector_query = encoder.encode(
-              query_con_prefijo, convert_to_tensor=True
-          )
+          .order("fecha", desc=True)
+          .limit(500 if mostrar_todos else 100)
+          .execute()
+      )
+      resultados = response.data
+      # Añadir similitud por defecto del 100% si no es búsqueda semántica
+      for r in resultados:
+        r["similarity"] = 1.0
 
-          vectores_tensor = encoder.encode(
-              df["texto_completo"].tolist(), convert_to_tensor=True
-          )
-          cos_scores = util.cos_sim(vector_query, vectores_tensor)[0]
-
-          df["relevancia"] = (cos_scores.cpu().numpy() * 100).round(2)
-          df = df.sort_values(by="relevancia", ascending=False)
+    if not resultados:
+      st.warning(
+          "No se encontraron resultados que coincidan con la búsqueda."
+      )
+    else:
+      df = pd.DataFrame(resultados)
+      if "similarity" in df.columns:
+        df["relevancia"] = (df["similarity"] * 100).round(2)
       else:
         df["relevancia"] = 100.0
-        if "fecha" in df.columns:
-          df = df.sort_values(by="fecha", ascending=False)
 
-      # --- APLICAR FILTROS ---
+      # --- APLICAR FILTROS EN PANDAS SOBRE LOS RESULTADOS YA REDUCIDOS ---
       if not df.empty and importe_min > 0:
         df = df[df["importe"] >= importe_min]
       if not df.empty and importe_max > 0:
@@ -648,8 +665,6 @@ elif btn_buscar:
               "Fecha Pub.": row.fecha,
               "Importe": f"{row.importe:,.2f} €",
               "Enlace": row.enlace,
-              # "Es Novedad": getattr(row, "es_novedad", False),
-              # "Es Actualizada": getattr(row, "es_actualizada", False),
           })
 
         df_final = pd.DataFrame(tabla_final)
