@@ -382,7 +382,7 @@ with col7:
 
 col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
-  mostrar_todos = st.checkbox("Mostrar TODOS", key="mostrar_todos")
+  mostrar_todos = st.checkbox("Mostrar TODOS los resultados (últimos 1000)", key="mostrar_todos")
 with col_chk2:
   usar_filtro_fechas = st.checkbox(
       "📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas"
@@ -402,13 +402,12 @@ if usar_filtro_fechas:
 
 if usar_filtro_cierre:
   st.markdown(
-      "##### Fecha fin de presentación de oferta (Muestra las que acaban en"
-      " este día o después)"
+      "##### Fecha fin de presentación de oferta"
   )
   col_c1, _ = st.columns([1, 1])
   with col_c1:
     fecha_cierre_tope = st.date_input(
-        "Fecha tope mínima de fin de presentación", value=date(2026, 3, 1)
+        "Fecha tope mínima de fin de presentación (Muestra las que acaban en este día o después)", value=date(2026, 3, 1)
     )
 
 st.write("")
