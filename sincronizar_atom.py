@@ -10,6 +10,9 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Límite de seguridad para la capa gratuita de Supabase (450 MB en lugar de 500 MB para margen operativo)
+BYTES_MAXIMOS_GRATIS = 450 * 1024 * 1024  
+
 # 2. Cargar modelo de IA en CPU
 print("Cargando modelo de IA (multilingual-e5-small)...")
 encoder = SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
@@ -26,25 +29,13 @@ NS = {
 # Diccionario de correspondencias de códigos NUTS 2 y 3 de España a nombres legibles
 MAPEO_NUTS = {
     # --- NUTS 2 (Comunidades y Ciudades Autónomas) ---
-    "ES11": "Galicia",
-    "ES12": "Principado de Asturias",
-    "ES13": "Cantabria",
-    "ES21": "País Vasco",
-    "ES22": "Comunidad Foral de Navarra",
-    "ES23": "La Rioja",
-    "ES24": "Aragón",
-    "ES30": "Comunidad de Madrid",
-    "ES41": "Castilla y León",
-    "ES42": "Castilla-La Mancha",
-    "ES43": "Extremadura",
-    "ES51": "Cataluña",
-    "ES52": "Comunidad Valenciana",
-    "ES53": "Illes Balears",
-    "ES61": "Andalucía",
-    "ES62": "Región de Murcia",
-    "ES63": "Ciudad Autónoma de Ceuta",
-    "ES64": "Ciudad Autónoma de Melilla",
-    "ES70": "Canarias",
+    "ES11": "Galicia", "ES12": "Principado de Asturias", "ES13": "Cantabria",
+    "ES21": "País Vasco", "ES22": "Comunidad Foral de Navarra", "ES23": "La Rioja",
+    "ES24": "Aragón", "ES30": "Comunidad de Madrid", "ES41": "Castilla y León",
+    "ES42": "Castilla-La Mancha", "ES43": "Extremadura", "ES51": "Cataluña",
+    "ES52": "Comunidad Valenciana", "ES53": "Illes Balears", "ES61": "Andalucía",
+    "ES62": "Región de Murcia", "ES63": "Ciudad Autónoma de Ceuta",
+    "ES64": "Ciudad Autónoma de Melilla", "ES70": "Canarias",
 
     # --- NUTS 3 (Provincias e Islas) ---
     "ES111": "A Coruña", "ES112": "Lugo", "ES113": "Ourense", "ES114": "Pontevedra",
@@ -82,9 +73,39 @@ def _texto(el, xpath, ns=NS):
     nodo = el.find(xpath, ns)
     return nodo.text.strip() if nodo is not None and nodo.text else None
 
+def liberar_espacio_si_es_necesario():
+    """Calcula el tamaño real de la base de datos en Supabase y borra licitaciones antiguas si roza los 450 MB."""
+    try:
+        # Consulta de tamaño de base de datos usando función interna de Postgres en Supabase
+        res = supabase.rpc("pg_database_size", {"datname": "postgres"}).execute()
+        # Si no tienes configurada la función RPC, calculamos de forma estimada por conteo de filas
+        # 1 fila aprox = 3.5 KB. 450 MB / 3.5 KB = ~128,000 filas como tope seguro.
+        conteo = supabase.table("licitaciones").select("id", count="exact").execute()
+        total_filas = conteo.count if conteo.count is not None else 0
+        
+        print(f"📊 Registros actuales en Supabase: {total_filas} filas.")
+        
+        # Umbral de seguridad: si pasamos de 120,000 licitaciones, empezamos a purgar las más antiguas
+        LIMITE_SEGURIDAD_FILAS = 120000 
+        
+        if total_filas >= LIMITE_SEGURIDAD_FILAS:
+            exceso = total_filas - LIMITE_SEGURIDAD_FILAS + 500  # Borramos el exceso más un colchón
+            print(f"⚠️ Cerca del límite de la capa gratuita (500 MB). Purgando las {exceso} licitaciones más antiguas...")
+            
+            antiguas = supabase.table("licitaciones").select("id").order("fecha_fin", desc=False).limit(exceso).execute()
+            if antiguas.data:
+                ids_a_borrar = [row["id"] for row in antiguas.data]
+                supabase.table("licitaciones").delete().in_("id", ids_a_borrar).execute()
+                print(f"🗑️ Eliminados {len(ids_a_borrar)} registros antiguos con éxito para liberar espacio.")
+    except Exception as e:
+        print(f"⚠️ No se pudo comprobar el tamaño exacto (continuando con normalidad): {e}")
+
 def sincronizar():
-    print("🔄 Iniciando sincronización avanzada de feeds ATOM con filtro de vigencia...")
+    print("🔄 Iniciando sincronización avanzada con control de límites gratuitos...")
     hoy = date.today()
+    
+    # Comprobar estado de espacio antes de meter volumen masivo
+    liberar_espacio_si_es_necesario()
     
     for fuente in FUENTES_ATOM:
         print(f"📥 Leyendo fuente: {fuente['nombre']}...")
@@ -111,7 +132,7 @@ def sincronizar():
         omitidas_por_fecha = 0
 
         for entry in entries:
-            # --- FILTRO DE FECHA: Descartar si ya ha expirado la presentación ---
+            # --- FILTRO DE FECHA: Descartar si la fecha de fin de presentación es anterior a hoy ---
             try:
                 end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
                 if end_date_el is not None and end_date_el.text:
@@ -125,7 +146,7 @@ def sincronizar():
 
             titulo = _texto(entry, "atom:title") or "Sin título"
             
-            # Extracción del enlace
+            # Enlace
             enlace_el = entry.find("atom:link", NS)
             enlace = enlace_el.get("href") if enlace_el is not None else ""
             if not enlace:
@@ -139,11 +160,21 @@ def sincronizar():
             txt_fecha = _texto(entry, "atom:updated") or _texto(entry, "atom:published")
             fecha = txt_fecha.split("T")[0] if txt_fecha else str(hoy)
 
-            # Fecha fin de presentación limpia para guardar
             fecha_fin = "No especificada"
             try:
                 if end_date_el is not None and end_date_el.text:
                     fecha_fin = end_date_el.text.strip()
+            except Exception:
+                pass
+
+            # --- Extracción de CPV (Múltiples separados por coma) ---
+            cpv_codigo = "No especificado"
+            try:
+                cpv_elements = entry.findall(".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cac:RequiredCommodityClassification/cbc:ItemClassificationCode", NS)
+                if cpv_elements:
+                    codigos = [el.text.strip() for el in cpv_elements if el.text]
+                    if codigos:
+                        cpv_codigo = ", ".join(codigos)
             except Exception:
                 pass
 
@@ -198,22 +229,23 @@ def sincronizar():
             except Exception:
                 pass
 
-            # Descripción adicional
+            # Descripción
             descripcion = _texto(entry, ".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:Name", NS)
             if not descripcion:
-                descripcion = _texto(entry, ".//cac:ProcurementProject/cbc:Description", NS) or ""
+                descripcion = _texto(entry, ".//cac-ProcurementProject/cbc:Description", NS) or ""
 
             # Texto enriquecido para la IA
             texto_evaluacion = (
                 f"passage: Título: {titulo}. "
                 f"Objeto del contrato: {descripcion}. "
                 f"Órgano: {organo}. "
+                f"CPV: {cpv_codigo}. "
                 f"Lugar de ejecución: {lugar_ejecucion}. "
                 f"Importe: {importe} EUR. "
                 f"Fecha fin oferta: {fecha_fin}"
             )
 
-            # Verificar si ya existe en Supabase
+            # Verificar si existe en Supabase
             resp = supabase.table("licitaciones").select("id, enlace").eq("enlace", enlace).execute()
 
             if not resp.data:
@@ -224,13 +256,14 @@ def sincronizar():
                     "fecha": fecha,
                     "importe": importe,
                     "enlace": enlace.strip(),
+                    "cpv": cpv_codigo,
                     "lugar_ejecucion": lugar_ejecucion,
                     "fecha_fin": fecha_fin,
                     "texto_completo": texto_evaluacion,
                     "embedding": vector
                 }
                 supabase.table("licitaciones").insert(nuevo_registro).execute()
-                print(f"➕ Nueva añadida: {titulo[:30]}... ({importe}€)")
+                print(f"➕ Nueva añadida: {titulo[:30]}... [CPV: {cpv_codigo}]")
             else:
                 vector = encoder.encode(texto_evaluacion).tolist()
                 datos_actualizados = {
@@ -238,17 +271,18 @@ def sincronizar():
                     "organo": organo.strip(),
                     "fecha": fecha,
                     "importe": importe,
+                    "cpv": cpv_codigo,
                     "lugar_ejecucion": lugar_ejecucion,
                     "fecha_fin": fecha_fin,
                     "texto_completo": texto_evaluacion,
                     "embedding": vector
                 }
                 supabase.table("licitaciones").update(datos_actualizados).eq("enlace", enlace).execute()
-                print(f"🔄 Actualizada: {titulo[:30]}... ({importe}€)")
+                print(f"🔄 Actualizada: {titulo[:30]}... [CPV: {cpv_codigo}]")
 
-        print(f"ℹ️ Omitidas {omitidas_por_fecha} licitaciones por estar caducadas en {fuente['nombre']}.")
+        print(f"ℹ️ Omitidas {omitidas_por_fecha} licitaciones caducadas en {fuente['nombre']}.")
 
-    print("✅ Sincronización ATOM avanzada con filtro completada con éxito.")
+    print("✅ Sincronización finalizada correctamente.")
 
 if __name__ == "__main__":
     sincronizar()
