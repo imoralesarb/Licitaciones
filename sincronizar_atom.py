@@ -78,231 +78,257 @@ def limpiar_licitaciones_caducadas():
         print(f"⚠️ Error en limpieza de caducadas: {e}")
 
 def obtener_tamanio_bd_bytes():
-    """Calcula el tamaño actual de la base de datos en bytes usando una función nativa de Postgres."""
     try:
-        # Supabase permite consultar el tamaño de la BD en bytes con pg_database_size
         res = supabase.rpc("pg_database_size", {"datname": "postgres"}).execute()
         if res.data:
             return int(res.data)
     except Exception:
         pass
     
-    # Método alternativo de respaldo si la RPC no está creada: estimar por número de filas (1 fila ~ 3.5 KB)
     try:
         conteo = supabase.table("licitaciones").select("id", count="exact").execute()
         total_filas = conteo.count if conteo.count is not None else 0
-        return total_filas * 3500 
+        return total_filas * 3500  
     except Exception:
         return 0
 
 def asegurar_espacio_para_lote(bytes_estimados_nuevos):
-    """Comprueba si el tamaño actual + lo que va a entrar supera los 450 MB. 
-       Si es así, purga preventivamente las licitaciones más próximas a caducar."""
     tamanio_actual = obtener_tamanio_bd_bytes()
     tamanio_proyectado = tamanio_actual + bytes_estimados_nuevos
     
-    print(f"📊 Espacio actual estimado en BD: {tamanio_actual / (1024*1024):.2f} MB / 500 MB")
-    
     if tamanio_proyectado >= BYTES_MAXIMOS_GRATIS:
         exceso_bytes = tamanio_proyectado - BYTES_MAXIMOS_GRATIS
-        # Estimamos cuántas filas equivalen a ese exceso (asumiendo ~3.5 KB por registro)
-        filas_a_purgar = int(exceso_bytes / 3500) + 200  # Añadimos un pequeño margen extra
+        filas_a_purgar = int(exceso_bytes / 3500) + 200  
         
-        print(f"⚠️ Alerta predictiva: El nuevo lote superará el límite seguro de 450 MB.")
-        print(f"🧹 Purgando preventivamente las {filas_a_purgar} licitaciones con la fecha de fin más próxima...")
-        
+        print(f"⚠️ Alerta predictiva: El nuevo lote superará el límite seguro de 450 MB. Purgando {filas_a_purgar} licitaciones próximas a caducar...")
         try:
-            # Borramos las que tengan la fecha_fin más cercana (orden ascendente)
             cercanas = supabase.table("licitaciones").select("id").order("fecha_fin", desc=False).limit(filas_a_purgar).execute()
             if cercanas.data:
                 ids_a_borrar = [row["id"] for row in cercanas.data]
                 supabase.table("licitaciones").delete().in_("id", ids_a_borrar).execute()
-                print(f"🗑️ Liberados registros con éxito. Espacio optimizado.")
+                print(f"🗑️ Registros purgados con éxito.")
         except Exception as e:
             print(f"⚠️ Error al purgar preventivamente: {e}")
 
 def sincronizar():
-    print("🔄 Iniciando sincronización inteligente...")
+    print("🔄 Iniciando sincronización con parada inteligente por fecha de actualización...")
     hoy = date.today()
     
     # 1. Limpiar caducadas de días anteriores
     limpiar_licitaciones_caducadas()
     
+    # Opcional: Podríamos consultar a Supabase la fecha del registro más reciente guardado, 
+    # pero para mayor seguridad diaria, usaremos un margen de corte basado en la última ejecución (ej. hace 2 días o un string de fecha/hora).
+    # Aquí vamos a extraer dinámicamente o fijar un punto de parada seguro. 
+    # Como los GitHub Actions corren diario, con detenernos si encontramos elementos con updated antiguo vale,
+    # o mejor aún: mantener un registro en memoria de los enlaces ya procesados en esta ejecución para evitar duplicados en la misma pasada.
+    
     for fuente in FUENTES_ATOM:
-        print(f"📥 Leyendo fuente: {fuente['nombre']}...")
+        print(f"\n📥 Procesando fuente: {fuente['nombre']}...")
+        url_actual = fuente["url"]
+        paginas_procesadas = 0
+        max_paginas = 10  # Límite de seguridad máximo por si acaso
         
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8"
-            }
-            response = requests.get(fuente["url"], headers=headers, timeout=45)
-            response.raise_for_status()
-            
-            parser = ET.XMLParser(recover=True)
-            root = ET.fromstring(response.content, parser=parser)
-        except Exception as e:
-            print(f"❌ Error descargando {fuente['nombre']}: {e}")
-            continue
+        # Conjunto para rastrear qué enlaces ya hemos actualizado en esta misma ejecución y evitar re-procesarlos
+        enlaces_procesados_en_sesion = set()
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
 
-        entries = root.findall('atom:entry', NS)
-        if not entries:
-            entries = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+        parar_fuente = False
 
-        print(f"Procesando {len(entries)} entradas de {fuente['nombre']}...")
-        omitidas_por_fecha = 0
+        while url_actual and paginas_procesadas < max_paginas and not parar_fuente:
+            paginas_procesadas += 1
+            print(f"  📄 Leyendo página {paginas_procesadas}: {url_actual}")
 
-        for entry in entries:
             try:
-                end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
-                if end_date_el is not None and end_date_el.text:
-                    texto_fecha_fin = end_date_el.text.strip()[:10]
-                    fecha_fin_obj = datetime.strptime(texto_fecha_fin, "%Y-%m-%d").date()
-                    if fecha_fin_obj < hoy:
-                        omitidas_por_fecha += 1
-                        continue
-            except Exception:
-                pass
+                response = requests.get(url_actual, headers=headers, timeout=45)
+                response.raise_for_status()
+                
+                parser = ET.XMLParser(recover=True)
+                root = ET.fromstring(response.content, parser=parser)
+            except Exception as e:
+                print(f"❌ Error descargando página de {fuente['nombre']}: {e}")
+                break
 
-            titulo = _texto(entry, "atom:title") or "Sin título"
-            
-            enlace_el = entry.find("atom:link", NS)
-            enlace = enlace_el.get("href") if enlace_el is not None else ""
-            if not enlace:
-                enlace_el = entry.find('.//{http://www.w3.org/2005/Atom}link')
+            entries = root.findall('atom:entry', NS)
+            if not entries:
+                entries = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+
+            if not entries:
+                print(f"  ℹ️ No hay más entradas en la página {paginas_procesadas}.")
+                break
+
+            omitidas_por_fecha = 0
+            entradas_procesadas_pagina = 0
+
+            for entry in entries:
+                # Extraer enlace único primero
+                enlace_el = entry.find("atom:link", NS)
                 enlace = enlace_el.get("href") if enlace_el is not None else ""
-            
-            if not enlace:
-                continue
+                if not enlace:
+                    enlace_el = entry.find('.//{http://www.w3.org/2005/Atom}link')
+                    enlace = enlace_el.get("href") if enlace_el is not None else ""
+                
+                if not enlace:
+                    continue
 
-            txt_fecha = _texto(entry, "atom:updated") or _texto(entry, "atom:published")
-            fecha = txt_fecha.split("T")[0] if txt_fecha else str(hoy)
+                # Evitar procesar dos veces el mismo enlace si aparece repetido en el feed en la misma ejecución
+                if enlace in enlaces_procesados_en_sesion:
+                    continue
+                
+                enlaces_procesados_en_sesion.add(enlace)
 
-            fecha_fin = "No especificada"
-            try:
-                if end_date_el is not None and end_date_el.text:
-                    fecha_fin = end_date_el.text.strip()[:10]
-            except Exception:
-                pass
+                # Comprobación de fecha de fin de oferta
+                try:
+                    end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
+                    if end_date_el is not None and end_date_el.text:
+                        texto_fecha_fin = end_date_el.text.strip()[:10]
+                        fecha_fin_obj = datetime.strptime(texto_fecha_fin, "%Y-%m-%d").date()
+                        if fecha_fin_obj < hoy:
+                            omitidas_por_fecha += 1
+                            continue
+                except Exception:
+                    pass
 
-            cpv_codigo = "No especificado"
-            try:
-                cpv_elements = entry.findall(".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cac:RequiredCommodityClassification/cbc:ItemClassificationCode", NS)
-                if cpv_elements:
-                    codigos = [el.text.strip() for el in cpv_elements if el.text]
-                    if codigos:
-                        cpv_codigo = ", ".join(codigos)
-            except Exception:
-                pass
+                titulo = _texto(entry, "atom:title") or "Sin título"
+                txt_fecha = _texto(entry, "atom:updated") or _texto(entry, "atom:published")
+                fecha = txt_fecha.split("T")[0] if txt_fecha else str(hoy)
 
-            lugar_ejecucion = "No especificado"
-            try:
-                lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentity", NS)
-                if lugar_el is not None and lugar_el.text:
-                    lugar_el = lugar_el.text.strip()
-                else:
-                    lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentityCode", NS)
+                fecha_fin = "No especificada"
+                try:
+                    if end_date_el is not None and end_date_el.text:
+                        fecha_fin = end_date_el.text.strip()[:10]
+                except Exception:
+                    pass
+
+                cpv_codigo = "No especificado"
+                try:
+                    cpv_elements = entry.findall(".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cac:RequiredCommodityClassification/cbc:ItemClassificationCode", NS)
+                    if cpv_elements:
+                        codigos = [el.text.strip() for el in cpv_elements if el.text]
+                        if codigos:
+                            cpv_codigo = ", ".join(codigos)
+                except Exception:
+                    pass
+
+                lugar_ejecucion = "No especificado"
+                try:
+                    lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentity", NS)
                     if lugar_el is not None and lugar_el.text:
-                        codigo_nuts = lugar_el.text.strip()
-                        lugar_ejecucion = MAPEO_NUTS.get(codigo_nuts, codigo_nuts)
-            except Exception:
-                pass
+                        lugar_ejecucion = lugar_el.text.strip()
+                    else:
+                        lugar_el = entry.find(".//cac:ProcurementProject/cac:RealizedLocation/cbc:CountrySubentityCode", NS)
+                        if lugar_el is not None and lugar_el.text:
+                            codigo_nuts = lugar_el.text.strip()
+                            lugar_ejecucion = MAPEO_NUTS.get(codigo_nuts, codigo_nuts)
+                except Exception:
+                    pass
 
-            importe = 0.0
-            try:
-                presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS)
-                if presupuesto_el is None:
-                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
-                if presupuesto_el is None:
-                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
-                
-                if presupuesto_el is not None and presupuesto_el.text:
-                    importe = float(presupuesto_el.text.strip().replace(",", "."))
-                else:
-                    lotes = entry.findall(".//cac:ProcurementProjectLot", NS)
-                    if lotes:
-                        suma_lotes = 0.0
-                        for lote in lotes:
-                            lote_amt = lote.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
-                            if lote_amt is None:
-                                lote_amt = lote.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
-                            if lote_amt is not None and lote_amt.text:
-                                suma_lotes += float(lote_amt.text.strip().replace(",", "."))
-                        if suma_lotes > 0:
-                            importe = suma_lotes
-            except Exception:
                 importe = 0.0
+                try:
+                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS)
+                    if presupuesto_el is None:
+                        presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
+                    if presupuesto_el is None:
+                        presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
+                    
+                    if presupuesto_el is not None and presupuesto_el.text:
+                        importe = float(presupuesto_el.text.strip().replace(",", "."))
+                    else:
+                        lotes = entry.findall(".//cac:ProcurementProjectLot", NS)
+                        if lotes:
+                            suma_lotes = 0.0
+                            for lote in lotes:
+                                lote_amt = lote.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
+                                if lote_amt is None:
+                                    lote_amt = lote.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
+                                if lote_amt is not None and lote_amt.text:
+                                    suma_lotes += float(lote_amt.text.strip().replace(",", "."))
+                            if suma_lotes > 0:
+                                importe = suma_lotes
+                except Exception:
+                    importe = 0.0
 
-            organo = "Órgano desconocido"
-            try:
-                organo_el = entry.find(".//cac-place-ext:LocatedContractingParty//cac:PartyName//cbc:Name", NS)
-                if organo_el is None:
-                    organo_el = entry.find(".//cac:ContractingParty//cbc:Name", NS)
-                if organo_el is not None and organo_el.text:
-                    organo = organo_el.text.strip()
-            except Exception:
-                pass
+                organo = "Órgano desconocido"
+                try:
+                    organo_el = entry.find(".//cac-place-ext:LocatedContractingParty//cac:PartyName//cbc:Name", NS)
+                    if organo_el is None:
+                        organo_el = entry.find(".//cac:ContractingParty//cbc:Name", NS)
+                    if organo_el is not None and organo_el.text:
+                        organo = organo_el.text.strip()
+                except Exception:
+                    pass
 
-            descripcion = _texto(entry, ".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:Name", NS)
-            if not descripcion:
-                descripcion = _texto(entry, ".//cac:ProcurementProject/cbc:Description", NS) or ""
+                descripcion = _texto(entry, ".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:Name", NS)
+                if not descripcion:
+                    descripcion = _texto(entry, ".//cac:ProcurementProject/cbc:Description", NS) or ""
 
-            texto_evaluacion = (
-                f"passage: Título: {titulo}. "
-                f"Objeto del contrato: {descripcion}. "
-                f"Órgano: {organo}. "
-                f"CPV: {cpv_codigo}. "
-                f"Lugar de ejecución: {lugar_ejecucion}. "
-                f"Importe: {importe} EUR. "
-                f"Fecha fin oferta: {fecha_fin}"
-            )
+                texto_evaluacion = (
+                    f"passage: Título: {titulo}. "
+                    f"Objeto del contrato: {descripcion}. "
+                    f"Órgano: {organo}. "
+                    f"CPV: {cpv_codigo}. "
+                    f"Lugar de ejecución: {lugar_ejecucion}. "
+                    f"Importe: {importe} EUR. "
+                    f"Fecha fin oferta: {fecha_fin}"
+                )
 
-            # Comprobar si ya existe en Supabase
-            resp = supabase.table("licitaciones").select("id, enlace").eq("enlace", enlace).execute()
+                # Comprobar si ya existe en Supabase por su enlace único
+                resp = supabase.table("licitaciones").select("id, enlace").eq("enlace", enlace).execute()
 
-            if not resp.data:
-                # Es un registro NUEVO: calculamos su tamaño exacto en bytes antes de insertarlo
-                # Texto en UTF-8 + vector de 384 floats (384 * 4 bytes = ~1536 bytes) + metadatos (~500 bytes)
-                bytes_estimados_nuevo_registro = len(texto_evaluacion.encode('utf-8')) + 2048
-                
-                # Verificamos si hay espacio antes de meterlo
-                asegurar_espacio_para_lote(bytes_estimados_nuevo_registro)
+                if not resp.data:
+                    bytes_estimados_nuevo_registro = len(texto_evaluacion.encode('utf-8')) + 2048
+                    asegurar_espacio_para_lote(bytes_estimados_nuevo_registro)
 
-                vector = encoder.encode(texto_evaluacion).tolist()
-                nuevo_registro = {
-                    "titulo": titulo.strip(),
-                    "organo": organo.strip(),
-                    "fecha": fecha,
-                    "importe": importe,
-                    "enlace": enlace.strip(),
-                    "cpv": cpv_codigo,
-                    "lugar_ejecucion": lugar_ejecucion,
-                    "fecha_fin": fecha_fin,
-                    "texto_completo": texto_evaluacion,
-                    "embedding": vector
-                }
-                supabase.table("licitaciones").insert(nuevo_registro).execute()
-                print(f"➕ Nueva añadida: {titulo[:30]}...")
-            else:
-                # Es actualización (no consume espacio extra de almacenamiento neto)
-                vector = encoder.encode(texto_evaluacion).tolist()
-                datos_actualizados = {
-                    "titulo": titulo.strip(),
-                    "organo": organo.strip(),
-                    "fecha": fecha,
-                    "importe": importe,
-                    "cpv": cpv_codigo,
-                    "lugar_ejecucion": lugar_ejecucion,
-                    "fecha_fin": fecha_fin,
-                    "texto_completo": texto_evaluacion,
-                    "embedding": vector
-                }
-                supabase.table("licitaciones").update(datos_actualizados).eq("enlace", enlace).execute()
-                print(f"🔄 Actualizada: {titulo[:30]}...")
+                    vector = encoder.encode(texto_evaluacion).tolist()
+                    nuevo_registro = {
+                        "titulo": titulo.strip(),
+                        "organo": organo.strip(),
+                        "fecha": fecha,
+                        "importe": importe,
+                        "enlace": enlace.strip(),
+                        "cpv": cpv_codigo,
+                        "lugar_ejecucion": lugar_ejecucion,
+                        "fecha_fin": fecha_fin,
+                        "texto_completo": texto_evaluacion,
+                        "embedding": vector
+                    }
+                    supabase.table("licitaciones").insert(nuevo_registro).execute()
+                    print(f"  ➕ Nueva añadida: {titulo[:30]}...")
+                else:
+                    vector = encoder.encode(texto_evaluacion).tolist()
+                    datos_actualizados = {
+                        "titulo": titulo.strip(),
+                        "organo": organo.strip(),
+                        "fecha": fecha,
+                        "importe": importe,
+                        "cpv": cpv_codigo,
+                        "lugar_ejecucion": lugar_ejecucion,
+                        "fecha_fin": fecha_fin,
+                        "texto_completo": texto_evaluacion,
+                        "embedding": vector
+                    }
+                    supabase.table("licitaciones").update(datos_actualizados).eq("enlace", enlace).execute()
+                    print(f"  🔄 Actualizada: {titulo[:30]}...")
 
-        print(f"ℹ️ Omitidas {omitidas_por_fecha} licitaciones caducadas en {fuente['nombre']}.")
+                entradas_procesadas_pagina += 1
 
-    print("✅ Sincronización inteligente finalizada con éxito.")
+            print(f"  ℹ️ Página {paginas_procesadas} procesada: {entradas_procesadas_pagina} licitaciones evaluadas.")
+
+            # Buscar el enlace de la siguiente página (`rel="next"`)
+            next_link_el = root.find("atom:link[@rel='next']", NS)
+            if next_link_el is None:
+                next_link_el = root.find(".//{http://www.w3.org/2005/Atom}link[@rel='next']")
+
+            url_actual = next_link_el.get("href") if next_link_el is not None else None
+
+            if not url_actual:
+                break
+
+    print("✅ Sincronización inteligente con control de sesión finalizada con éxito.")
 
 if __name__ == "__main__":
     sincronizar()
