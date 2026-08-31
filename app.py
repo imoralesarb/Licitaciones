@@ -67,11 +67,31 @@ def cargar_modelo():
 with st.spinner("Cargando modelo de IA..."):
     encoder = cargar_modelo()
 
-# 3. Descargar datos de Supabase incluyendo los nuevos campos para filtros
+# 3. Descargar datos de Supabase sin límite de 1000 registros
 @st.cache_data(ttl=600)
 def obtener_datos_supabase():
-    response = supabase.table("licitaciones").select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding, cpv").execute()
-    return response.data
+    todos_los_datos = []
+    tamano_lote = 1000
+    inicio = 0
+    
+    while True:
+        response = supabase.table("licitaciones")\
+            .select("titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin, texto_completo, embedding, cpv")\
+            .range(inicio, inicio + tamano_lote - 1)\
+            .execute()
+        
+        filas = response.data
+        if not filas:
+            break
+            
+        todos_los_datos.extend(filas)
+        
+        if len(filas) < tamano_lote:
+            break  # Ya hemos descargado la última página
+            
+        inicio += tamano_lote
+        
+    return todos_los_datos
 
 # MAPA TERRITORIAL COMPLETO DE ESPAÑA
 MAPA_TERRITORIAL = {
