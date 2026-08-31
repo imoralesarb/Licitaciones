@@ -2,9 +2,7 @@ name: Sincronizar Licitaciones ATOM
 
 on:
   schedule:
-    # A las 06:00 UTC (6:00 AM hora canaria en invierno)
-    - cron: '0 6 * * *'
-    # A las 05:00 UTC (6:00 AM hora canaria en verano)
+    # Se ejecutará a las 05:00 UTC (las 6:00 AM en horario de verano de Canarias)
     - cron: '0 5 * * *'
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub
 
