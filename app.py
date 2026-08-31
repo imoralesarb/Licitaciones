@@ -425,7 +425,7 @@ with col_btn_buscar:
 
 with col_btn_novedades:
   btn_novedades = st.button(
-      "✨ Ver Novedades / Actualizadas",
+      "✨ Novedades",
       type="secondary",
       use_container_width=True,
   )
@@ -648,8 +648,8 @@ elif btn_buscar:
               "Fecha Pub.": row.fecha,
               "Importe": f"{row.importe:,.2f} €",
               "Enlace": row.enlace,
-              "Es Novedad": getattr(row, "es_novedad", False),
-              "Es Actualizada": getattr(row, "es_actualizada", False),
+              # "Es Novedad": getattr(row, "es_novedad", False),
+              # "Es Actualizada": getattr(row, "es_actualizada", False),
           })
 
         df_final = pd.DataFrame(tabla_final)
