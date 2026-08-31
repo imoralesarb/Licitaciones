@@ -2,8 +2,10 @@ name: Sincronizar Licitaciones ATOM
 
 on:
   schedule:
-    # Se ejecutará automáticamente cada 6 horas de forma gratuita
-    - cron: '0 */6 * * *'
+    # A las 06:00 UTC (6:00 AM hora canaria en invierno)
+    - cron: '0 6 * * *'
+    # A las 05:00 UTC (6:00 AM hora canaria en verano)
+    - cron: '0 5 * * *'
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub
 
 jobs:
@@ -21,7 +23,7 @@ jobs:
 
       - name: Instalar dependencias
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install feedparser supabase sentence-transformers lxml requests
 
       - name: Ejecutar script de sincronización
