@@ -505,7 +505,6 @@ elif btn_buscar:
     resultados = []
 
     if consulta_texto.strip():
-      # Búsqueda Semántica Optimizada en Base de Datos (Vectorial)
       query_con_prefijo = f"query: {consulta_texto.strip()}"
       vector_query = encoder.encode(query_con_prefijo).tolist()
 
@@ -515,31 +514,28 @@ elif btn_buscar:
             {
                 "query_embedding": vector_query,
                 "match_threshold": 0.3,
-                "match_count": 500
+                "match_count": 999999
                 if mostrar_todos
                 else max(limite_resultados * 3, 50),
             },
         ).execute()
         resultados = response.data
       except Exception as e:
-        st.error(
-            "⚠️ Error al ejecutar la búsqueda vectorial en Supabase."
-            f" Asegúrate de haber creado la función RPC correctamente. Detalle: {e}"
-        )
+        st.error(f"⚠️ Error al ejecutar la búsqueda vectorial: {e}")
     else:
-      # Si no hay texto de búsqueda, traemos los registros más recientes
-      response = (
+      query_sup = (
           supabase.table("licitaciones")
           .select(
               "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
               " fecha_fin, texto_completo, cpv, es_novedad, es_actualizada"
           )
           .order("fecha", desc=True)
-          .limit(500 if mostrar_todos else 100)
-          .execute()
       )
+      if not mostrar_todos:
+        query_sup = query_sup.limit(100)
+
+      response = query_sup.execute()
       resultados = response.data
-      # Añadir similitud por defecto del 100% si no es búsqueda semántica
       for r in resultados:
         r["similarity"] = 1.0
 
@@ -554,7 +550,7 @@ elif btn_buscar:
       else:
         df["relevancia"] = 100.0
 
-      # --- APLICAR FILTROS EN PANDAS SOBRE LOS RESULTADOS YA REDUCIDOS ---
+      # Filtros en Pandas (Importe, CCAA, CPV, Fechas...)
       if not df.empty and importe_min > 0:
         df = df[df["importe"] >= importe_min]
       if not df.empty and importe_max > 0:
@@ -572,7 +568,6 @@ elif btn_buscar:
           patron_regex = "|".join(patrones)
         else:
           patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
-
         df = df[
             df["lugar_ejecucion"].str.contains(
                 patron_regex, case=False, na=False, regex=True
@@ -616,8 +611,7 @@ elif btn_buscar:
           if not f_str:
             return False
           try:
-            obj_f = date.fromisoformat(f_str[:10])
-            return obj_f >= fecha_cierre_tope
+            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
           except ValueError:
             return False
 
@@ -630,8 +624,7 @@ elif btn_buscar:
           if not f_str:
             return False
           try:
-            obj_f = date.fromisoformat(f_str[:10])
-            return f_inicio <= obj_f <= f_fin
+            return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
           except ValueError:
             return False
 
@@ -642,10 +635,7 @@ elif btn_buscar:
         df = df.head(limite_resultados)
 
       if df.empty:
-        st.warning(
-            "No se encontraron resultados que cumplan con los filtros"
-            " indicados."
-        )
+        st.warning("No se encontraron resultados con los filtros indicados.")
       else:
         st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
         st.markdown(
@@ -657,7 +647,7 @@ elif btn_buscar:
         for idx, row in enumerate(df.itertuples(), start=1):
           tabla_final.append({
               "#": idx,
-              "Relevancia (%)": getattr(row, "relevancia", 100.0),
+              "Relevancia (%)": f"{getattr(row, 'relevancia', 100.0):.2f} %",
               "Título": row.titulo,
               "Órgano": row.organo,
               "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
