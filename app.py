@@ -393,7 +393,7 @@ with col7:
 
 col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
-    mostrar_todos = st.checkbox("Mostrar TODOS los resultados (últimos 1000)", key="mostrar_todos")
+    mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
 with col_chk2:
     usar_filtro_fechas = st.checkbox(
         "📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas"
