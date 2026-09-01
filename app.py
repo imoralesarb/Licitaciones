@@ -69,7 +69,7 @@ with st.spinner("Cargando modelo de IA..."):
     encoder = cargar_modelo()
 
 
-# 3. Descarga auxiliar optimizada solo para el botón de Novedades
+# 3. Descarga auxiliar paginada completa para el botón de Novedades (sin límite de 1000)
 @st.cache_data(ttl=600)
 def obtener_novedades_supabase():
     todos_los_datos = []
@@ -351,7 +351,6 @@ st.markdown("### ⚙️ Filtros avanzados")
 col0, col1, col2, col3, col4 = st.columns(5)
 
 with col0:
-    # Obtener fuentes únicas de Supabase de manera dinámica para el desplegable (con caché o consulta rápida)
     try:
         resp_fuentes = supabase.table("licitaciones").select("fuente").execute()
         lista_fuentes_db = sorted(list(set(item["fuente"] for item in resp_fuentes.data if item.get("fuente"))))
@@ -394,7 +393,7 @@ with col7:
 
 col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
-    mostrar_todos = st.checkbox("Mostrar TODOS los resultados (últimos 1000)", key="mostrar_todos")
+    mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
 with col_chk2:
     usar_filtro_fechas = st.checkbox(
         "📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas"
@@ -471,7 +470,6 @@ if btn_novedades:
             df = pd.DataFrame(data)
             df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
 
-            # Filtrar por fuente seleccionada si aplica
             if filtro_fuente != "🌐 Todas las fuentes" and "fuente" in df.columns:
                 df = df[df["fuente"] == filtro_fuente]
 
@@ -516,32 +514,45 @@ if btn_novedades:
                     use_container_width=True,
                 )
 
-# 6. Lógica de Búsqueda Principal vía Supabase RPC (Optimizado sin bloquear CPU)
+# 6. Lógica de Búsqueda Principal paginada (Paginación completa sin perder información)
 elif btn_buscar:
-    with st.spinner("Buscando en Supabase..."):
+    with st.spinner("Buscando en toda la base de datos..."):
         resultados = []
+        tamano_lote = 1000
+        inicio = 0
 
-        # Comprobamos si hay texto de búsqueda
+        # Si hay texto, generamos el vector una sola vez para la búsqueda semántica
         if consulta_texto.strip():
             query_con_prefijo = f"query: {consulta_texto.strip()}"
             vector_query = encoder.encode(query_con_prefijo).tolist()
         else:
-            # Si no hay texto, usamos un vector neutral (ceros) para que la función RPC 
-            # devuelva registros sin depender de una similitud semántica de texto.
-            # (Asegúrate de que el tamaño coincida con tu modelo, ej: 384 para multilingual-e5-small)
-            vector_query = [0.0] * 384 
+            vector_query = [0.0] * 384
+
+        # Determinar el límite total a escanear según la casilla "Mostrar TODOS"
+        limite_escaneo = 999999 if mostrar_todos else 2000
 
         try:
-            response = supabase.rpc(
-                "buscar_licitaciones",
-                {
-                    "query_embedding": vector_query,
-                    # Si no hay texto, bajamos el umbral a 0 para no descartar nada por similitud
-                    "match_threshold": 0.0 if not consulta_texto.strip() else 0.3,
-                    "match_count": 999999 if mostrar_todos else 1000,
-                },
-            ).execute()
-            resultados = response.data
+            while True:
+                response = supabase.rpc(
+                    "buscar_licitaciones",
+                    {
+                        "query_embedding": vector_query,
+                        "match_threshold": 0.0 if not consulta_texto.strip() else 0.3,
+                        "match_count": tamano_lote,
+                    },
+                ).execute()
+                
+                filas = response.data
+                if not filas:
+                    break
+
+                resultados.extend(filas)
+                
+                # Si el usuario no marcó "Mostrar TODOS", paramos al llegar a un bloque razonable o si ya trajo menos del lote
+                if not mostrar_todos or len(filas) < tamano_lote or len(resultados) >= limite_escaneo:
+                    break
+                
+                inicio += tamano_lote
         except Exception as e:
             st.error(f"⚠️ Error al ejecutar la búsqueda: {e}")
 
@@ -554,7 +565,7 @@ elif btn_buscar:
             else:
                 df["relevancia"] = 100.0
 
-            # --- A partir de aquí siguen tus filtros de Pandas habituales ---
+            # --- Filtros de Pandas habituales ---
             if not df.empty and filtro_fuente != "🌐 Todas las fuentes" and "fuente" in df.columns:
                 df = df[df["fuente"] == filtro_fuente]
 
@@ -562,8 +573,6 @@ elif btn_buscar:
                 df = df[df["importe"] >= importe_min]
             if not df.empty and importe_max > 0:
                 df = df[df["importe"] <= importe_max]
-
-            # (Resto de filtros de CCAA, CPV y Fechas que ya tienes...)
 
             if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
@@ -615,7 +624,6 @@ elif btn_buscar:
                     df = df[df["cpv"].apply(coincide_codigo_cpv)]
 
             if not df.empty and usar_filtro_cierre:
-
                 def filtrar_fecha_fin(f_str):
                     if not f_str:
                         return False
@@ -628,7 +636,6 @@ elif btn_buscar:
                     df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
 
             if not df.empty and usar_filtro_fechas:
-
                 def filtrar_fecha_pub(f_str):
                     if not f_str:
                         return False
