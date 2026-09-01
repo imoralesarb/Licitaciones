@@ -247,10 +247,38 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     pass
 
                 importe = 0.0
+
                 try:
-                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS) or entry.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS) or entry.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
-                    if presupuesto_el is not None and presupuesto_el.text:
-                        importe = float(presupuesto_el.text.strip().replace(",", "."))
+                    presupuesto_el = entry.find(
+                        ".//cac:BudgetAmount/"
+                        "cbc:EstimatedOverallContractAmount",
+                        NS
+                    )
+                
+                    if presupuesto_el is None:
+                        presupuesto_el = entry.find(
+                            ".//cac:BudgetAmount/"
+                            "cbc:TaxExclusiveAmount",
+                            NS
+                        )
+                
+                    if presupuesto_el is None:
+                        presupuesto_el = entry.find(
+                            ".//cac:BudgetAmount/"
+                            "cbc:TotalAmount",
+                            NS
+                        )
+                
+                    if (
+                        presupuesto_el is not None
+                        and presupuesto_el.text
+                    ):
+                        importe = float(
+                            presupuesto_el.text
+                            .strip()
+                            .replace(",", ".")
+                        )
+                
                 except Exception:
                     pass
 
