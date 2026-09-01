@@ -53,8 +53,8 @@ SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-  st.error("⚠️ Faltan las credenciales de Supabase en los Secrets de Streamlit.")
-  st.stop()
+    st.error("⚠️ Faltan las credenciales de Supabase en los Secrets de Streamlit.")
+    st.stop()
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -62,41 +62,41 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # 2. Cargar modelo de IA en caché (solo codifica el texto de búsqueda)
 @st.cache_resource
 def cargar_modelo():
-  return SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
+    return SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
 
 
 with st.spinner("Cargando modelo de IA..."):
-  encoder = cargar_modelo()
+    encoder = cargar_modelo()
 
 
 # 3. Descarga auxiliar optimizada solo para el botón de Novedades
 @st.cache_data(ttl=600)
 def obtener_novedades_supabase():
-  todos_los_datos = []
-  tamano_lote = 1000
-  inicio = 0
+    todos_los_datos = []
+    tamano_lote = 1000
+    inicio = 0
 
-  while True:
-    response = (
-        supabase.table("licitaciones")
-        .select(
-            "titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin,"
-            " cpv, es_novedad, es_actualizada"
+    while True:
+        response = (
+            supabase.table("licitaciones")
+            .select(
+                "titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin,"
+                " cpv, es_novedad, es_actualizada"
+            )
+            .range(inicio, inicio + tamano_lote - 1)
+            .execute()
         )
-        .range(inicio, inicio + tamano_lote - 1)
-        .execute()
-    )
 
-    filas = response.data
-    if not filas:
-      break
+        filas = response.data
+        if not filas:
+            break
 
-    todos_los_datos.extend(filas)
-    if len(filas) < tamano_lote:
-      break
-    inicio += tamano_lote
+        todos_los_datos.extend(filas)
+        if len(filas) < tamano_lote:
+            break
+        inicio += tamano_lote
 
-  return todos_los_datos
+    return todos_los_datos
 
 
 # MAPA TERRITORIAL COMPLETO DE ESPAÑA
@@ -325,17 +325,17 @@ st.title("🔍 Buscador inteligente de Licitaciones")
 
 
 def limpiar_campos():
-  st.session_state.consulta_texto = ""
-  st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
-  st.session_state.filtro_lugar_libre = ""
-  st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
-  st.session_state.filtro_cpv_codigo = ""
-  st.session_state.importe_min = 0.0
-  st.session_state.importe_max = 0.0
-  st.session_state.limite_resultados = 10
-  st.session_state.mostrar_todos = False
-  st.session_state.usar_filtro_fechas = False
-  st.session_state.usar_filtro_cierre = False
+    st.session_state.consulta_texto = ""
+    st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
+    st.session_state.filtro_lugar_libre = ""
+    st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
+    st.session_state.filtro_cpv_codigo = ""
+    st.session_state.importe_min = 0.0
+    st.session_state.importe_max = 0.0
+    st.session_state.limite_resultados = 10
+    st.session_state.mostrar_todos = False
+    st.session_state.usar_filtro_fechas = False
+    st.session_state.usar_filtro_cierre = False
 
 
 # Buscador principal
@@ -350,65 +350,65 @@ st.markdown("### ⚙️ Filtros avanzados")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-  importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
+    importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
 with col2:
-  importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
+    importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
-  lista_ccaa = list(MAPA_TERRITORIAL.keys())
-  filtro_ccaa = st.selectbox(
-      "📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa"
-  )
+    lista_ccaa = list(MAPA_TERRITORIAL.keys())
+    filtro_ccaa = st.selectbox(
+        "📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa"
+    )
 with col4:
-  filtro_lugar_libre = st.text_input(
-      "📍 Lugar de ejecución (Libre)",
-      placeholder="ej. San Sebastián",
-      key="filtro_lugar_libre",
-  )
+    filtro_lugar_libre = st.text_input(
+        "📍 Lugar de ejecución (Libre)",
+        placeholder="ej. San Sebastián",
+        key="filtro_lugar_libre",
+    )
 
 col5, col6, col7 = st.columns(3)
 with col5:
-  lista_sectores = list(SECTORES_CPV.keys())
-  filtro_cpv_sector = st.selectbox(
-      "📦 Sector CPV", lista_sectores, key="filtro_cpv_sector"
-  )
+    lista_sectores = list(SECTORES_CPV.keys())
+    filtro_cpv_sector = st.selectbox(
+        "📦 Sector CPV", lista_sectores, key="filtro_cpv_sector"
+    )
 with col6:
-  filtro_cpv_codigo = st.text_input(
-      "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
-  )
+    filtro_cpv_codigo = st.text_input(
+        "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
+    )
 with col7:
-  limite_resultados = st.slider(
-      "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados"
-  )
+    limite_resultados = st.slider(
+        "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados"
+    )
 
 col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
 with col_chk1:
-  mostrar_todos = st.checkbox("Mostrar TODOS los resultados (últimos 1000)", key="mostrar_todos")
+    mostrar_todos = st.checkbox("Mostrar TODOS los resultados (últimos 1000)", key="mostrar_todos")
 with col_chk2:
-  usar_filtro_fechas = st.checkbox(
-      "📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas"
-  )
+    usar_filtro_fechas = st.checkbox(
+        "📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas"
+    )
 with col_chk3:
-  usar_filtro_cierre = st.checkbox(
-      "⏳ Fecha fin de presentación de oferta", key="usar_filtro_cierre"
-  )
+    usar_filtro_cierre = st.checkbox(
+        "⏳ Fecha fin de presentación de oferta", key="usar_filtro_cierre"
+    )
 
 if usar_filtro_fechas:
-  st.markdown("##### Rango de fecha de publicación")
-  col_f1, col_f2 = st.columns(2)
-  with col_f1:
-    f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
-  with col_f2:
-    f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
+    st.markdown("##### Rango de fecha de publicación")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
+    with col_f2:
+        f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
 
 if usar_filtro_cierre:
-  st.markdown(
-      "##### Fecha fin de presentación de oferta"
-  )
-  col_c1, _ = st.columns([1, 1])
-  with col_c1:
-    fecha_cierre_tope = st.date_input(
-        "Fecha tope mínima de fin de presentación (Muestra las que acaban en este día o después)", value=date(2026, 3, 1)
+    st.markdown(
+        "##### Fecha fin de presentación de oferta"
     )
+    col_c1, _ = st.columns([1, 1])
+    with col_c1:
+        fecha_cierre_tope = st.date_input(
+            "Fecha tope mínima de fin de presentación (Muestra las que acaban en este día o después)", value=date(2026, 3, 1)
+        )
 
 st.write("")
 
@@ -416,255 +416,263 @@ st.write("")
 col_btn_buscar, col_btn_novedades, col_btn_limpiar = st.columns([2, 2, 2])
 
 with col_btn_buscar:
-  btn_buscar = st.button(
-      "🔍 Buscar licitaciones", type="primary", use_container_width=True
-  )
+    btn_buscar = st.button(
+        "🔍 Buscar licitaciones", type="primary", use_container_width=True
+    )
 
 with col_btn_novedades:
-  btn_novedades = st.button(
-      "✨ Novedades",
-      type="secondary",
-      use_container_width=True,
-  )
+    btn_novedades = st.button(
+        "✨ Novedades",
+        type="secondary",
+        use_container_width=True,
+    )
 
 with col_btn_limpiar:
-  btn_limpiar = st.button(
-      "🔄 Limpiar Filtros",
-      on_click=limpiar_campos,
-      type="secondary",
-      use_container_width=True,
-  )
+    btn_limpiar = st.button(
+        "🔄 Limpiar Filtros",
+        on_click=limpiar_campos,
+        type="secondary",
+        use_container_width=True,
+    )
 
 
 # Función auxiliar para pintar las filas de la tabla de Streamlit
 def estilizar_filas(row):
-  if row.get("Es Novedad", False):
-    return [
-        "background-color: #d4edda; color: #155724; font-weight: bold;"
-    ] * len(row)
-  elif row.get("Es Actualizada", False):
-    return [
-        "background-color: #cce5ff; color: #004085; font-weight: bold;"
-    ] * len(row)
-  return [""] * len(row)
+    if row.get("Es Novedad", False):
+        return [
+            "background-color: #d4edda; color: #155724; font-weight: bold;"
+        ] * len(row)
+    elif row.get("Es Actualizada", False):
+        return [
+            "background-color: #cce5ff; color: #004085; font-weight: bold;"
+        ] * len(row)
+    return [""] * len(row)
 
 
 # 5. Lógica del Botón de Novedades
 if btn_novedades:
-  with st.spinner("Cargando novedades y actualizaciones..."):
-    data = obtener_novedades_supabase()
-    if not data:
-      st.info("No hay datos en Supabase.")
-    else:
-      df = pd.DataFrame(data)
-      df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
+    with st.spinner("Cargando novedades y actualizaciones..."):
+        data = obtener_novedades_supabase()
+        if not data:
+            st.info("No hay datos en Supabase.")
+        else:
+            df = pd.DataFrame(data)
+            df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
 
-      if df.empty:
-        st.info("No hay nuevas licitaciones ni actualizaciones en este ciclo.")
-      else:
-        st.success(
-            f"¡Se han encontrado {len(df)} licitaciones nuevas o actualizadas!"
-        )
-        st.markdown(
-            "🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones"
-            " Actualizadas"
-        )
-
-        tabla_final = []
-        for idx, row in enumerate(df.itertuples(), start=1):
-          tabla_final.append({
-              "#": idx,
-              "Título": row.titulo,
-              "Órgano": row.organo,
-              "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
-              "Cierre": getattr(row, "fecha_fin", "No especificada"),
-              "Fecha Pub.": row.fecha,
-              "Importe": f"{row.importe:,.2f} €",
-              "Enlace": row.enlace,
-              "Es Novedad": getattr(row, "es_novedad", False),
-              "Es Actualizada": getattr(row, "es_actualizada", False),
-          })
-
-        df_final = pd.DataFrame(tabla_final)
-
-        st.dataframe(
-            df_final.style.apply(estilizar_filas, axis=1),
-            column_config={
-                "Enlace": st.column_config.LinkColumn(
-                    "Enlace oficial", display_text="Ver licitación 🔗"
+            if df.empty:
+                st.info("No hay nuevas licitaciones ni actualizaciones en este ciclo.")
+            else:
+                st.success(
+                    f"¡Se han encontrado {len(df)} licitaciones nuevas o actualizadas!"
                 )
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
+                st.markdown(
+                    "🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones"
+                    " Actualizadas"
+                )
+
+                tabla_final = []
+                for idx, row in enumerate(df.itertuples(), start=1):
+                    tabla_final.append({
+                        "#": idx,
+                        "Título": row.titulo,
+                        "Órgano": row.organo,
+                        "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
+                        "Cierre": getattr(row, "fecha_fin", "No especificada"),
+                        "Fecha Pub.": row.fecha,
+                        "Importe": f"{row.importe:,.2f} €",
+                        "Enlace": row.enlace,
+                        # Se conservan las columnas para el color, pero se ocultan mediante subset al mostrar el dataframe
+                        "Es Novedad": getattr(row, "es_novedad", False),
+                        "Es Actualizada": getattr(row, "es_actualizada", False),
+                    })
+
+                df_final = pd.DataFrame(tabla_final)
+
+                st.dataframe(
+                    df_final.style.apply(estilizar_filas, axis=1),
+                    column_config={
+                        "Enlace": st.column_config.LinkColumn(
+                            "Enlace oficial", display_text="Ver licitación 🔗"
+                        ),
+                        # Ocultar visualmente las columnas de control de color sin romper el estilo
+                        "Es Novedad": None,
+                        "Es Actualizada": None,
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                )
 
 # 6. Lógica de Búsqueda Principal vía Supabase RPC (Optimizado sin bloquear CPU)
 elif btn_buscar:
-  with st.spinner("Buscando en Supabase..."):
-    resultados = []
+    with st.spinner("Buscando en Supabase..."):
+        resultados = []
 
-    if consulta_texto.strip():
-      query_con_prefijo = f"query: {consulta_texto.strip()}"
-      vector_query = encoder.encode(query_con_prefijo).tolist()
+        if consulta_texto.strip():
+            query_con_prefijo = f"query: {consulta_texto.strip()}"
+            vector_query = encoder.encode(query_con_prefijo).tolist()
 
-      try:
-        response = supabase.rpc(
-            "buscar_licitaciones",
-            {
-                "query_embedding": vector_query,
-                "match_threshold": 0.3,
-                "match_count": 999999
-                if mostrar_todos
-                else max(limite_resultados * 3, 50),
-            },
-        ).execute()
-        resultados = response.data
-      except Exception as e:
-        st.error(f"⚠️ Error al ejecutar la búsqueda vectorial: {e}")
-    else:
-      query_sup = (
-          supabase.table("licitaciones")
-          .select(
-              "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
-              " fecha_fin, texto_completo, cpv, es_novedad, es_actualizada"
-          )
-          .order("fecha", desc=True)
-      )
-      if not mostrar_todos:
-        query_sup = query_sup.limit(100)
-
-      response = query_sup.execute()
-      resultados = response.data
-      for r in resultados:
-        r["similarity"] = 1.0
-
-    if not resultados:
-      st.warning(
-          "No se encontraron resultados que coincidan con la búsqueda."
-      )
-    else:
-      df = pd.DataFrame(resultados)
-      if "similarity" in df.columns:
-        df["relevancia"] = (df["similarity"] * 100).round(2)
-      else:
-        df["relevancia"] = 100.0
-
-      # Filtros en Pandas (Importe, CCAA, CPV, Fechas...)
-      if not df.empty and importe_min > 0:
-        df = df[df["importe"] >= importe_min]
-      if not df.empty and importe_max > 0:
-        df = df[df["importe"] <= importe_max]
-
-      if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
-        palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
-        if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
-          patrones = []
-          for p in palabras_clave:
-            if p == "Palma":
-              patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
-            else:
-              patrones.append(r"\b" + p + r"\b")
-          patron_regex = "|".join(patrones)
+            try:
+                response = supabase.rpc(
+                    "buscar_licitaciones",
+                    {
+                        "query_embedding": vector_query,
+                        "match_threshold": 0.3,
+                        "match_count": 999999
+                        if mostrar_todos
+                        else max(limite_resultados * 3, 50),
+                    },
+                ).execute()
+                resultados = response.data
+            except Exception as e:
+                st.error(f"⚠️ Error al ejecutar la búsqueda vectorial: {e}")
         else:
-          patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
-        df = df[
-            df["lugar_ejecucion"].str.contains(
-                patron_regex, case=False, na=False, regex=True
-            )
-        ]
-
-      if not df.empty and filtro_lugar_libre.strip():
-        df = df[
-            df["lugar_ejecucion"].str.contains(
-                filtro_lugar_libre.strip(), case=False, na=False
-            )
-        ]
-
-      if not df.empty and filtro_cpv_sector != "🌐 Todos los sectores CPV":
-        prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
-
-        def coincide_cpv(cpv_str):
-          if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
-            return False
-          lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-          return any(c.startswith(prefijos_validos) for c in lista_cpv)
-
-        if "cpv" in df.columns:
-          df = df[df["cpv"].apply(coincide_cpv)]
-
-      if not df.empty and filtro_cpv_codigo.strip():
-        codigo_busqueda = filtro_cpv_codigo.strip()
-
-        def coincide_codigo_cpv(cpv_str):
-          if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
-            return False
-          lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-          return any(codigo_busqueda in c for c in lista_cpv)
-
-        if "cpv" in df.columns:
-          df = df[df["cpv"].apply(coincide_codigo_cpv)]
-
-      if not df.empty and usar_filtro_cierre:
-
-        def filtrar_fecha_fin(f_str):
-          if not f_str:
-            return False
-          try:
-            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
-          except ValueError:
-            return False
-
-        if "fecha_fin" in df.columns:
-          df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
-
-      if not df.empty and usar_filtro_fechas:
-
-        def filtrar_fecha_pub(f_str):
-          if not f_str:
-            return False
-          try:
-            return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
-          except ValueError:
-            return False
-
-        if "fecha" in df.columns:
-          df = df[df["fecha"].apply(filtrar_fecha_pub)]
-
-      if not df.empty and not mostrar_todos:
-        df = df.head(limite_resultados)
-
-      if df.empty:
-        st.warning("No se encontraron resultados con los filtros indicados.")
-      else:
-        st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
-        st.markdown(
-            "🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones"
-            " Actualizadas"
-        )
-
-        tabla_final = []
-        for idx, row in enumerate(df.itertuples(), start=1):
-          tabla_final.append({
-              "#": idx,
-              "Relevancia (%)": f"{getattr(row, 'relevancia', 100.0):.2f} %",
-              "Título": row.titulo,
-              "Órgano": row.organo,
-              "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
-              "Cierre": getattr(row, "fecha_fin", "No especificada"),
-              "Fecha Pub.": row.fecha,
-              "Importe": f"{row.importe:,.2f} €",
-              "Enlace": row.enlace,
-          })
-
-        df_final = pd.DataFrame(tabla_final)
-
-        st.dataframe(
-            df_final.style.apply(estilizar_filas, axis=1),
-            column_config={
-                "Enlace": st.column_config.LinkColumn(
-                    "Enlace oficial", display_text="Ver licitación 🔗"
+            query_sup = (
+                supabase.table("licitaciones")
+                .select(
+                    "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
+                    " fecha_fin, texto_completo, cpv, es_novedad, es_actualizada"
                 )
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
+                .order("fecha", desc=True)
+            )
+            if not mostrar_todos:
+                query_sup = query_sup.limit(100)
+
+            response = query_sup.execute()
+            resultados = response.data
+            for r in resultados:
+                r["similarity"] = 1.0
+
+        if not resultados:
+            st.warning(
+                "No se encontraron resultados que coincidan con la búsqueda."
+            )
+        else:
+            df = pd.DataFrame(resultados)
+            if "similarity" in df.columns:
+                df["relevancia"] = (df["similarity"] * 100).round(2)
+            else:
+                df["relevancia"] = 100.0
+
+            # Filtros en Pandas (Importe, CCAA, CPV, Fechas...)
+            if not df.empty and importe_min > 0:
+                df = df[df["importe"] >= importe_min]
+            if not df.empty and importe_max > 0:
+                df = df[df["importe"] <= importe_max]
+
+            if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
+                palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
+                if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
+                    patrones = []
+                    for p in palabras_clave:
+                        if p == "Palma":
+                            patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
+                        else:
+                            patrones.append(r"\b" + p + r"\b")
+                    patron_regex = "|".join(patrones)
+                else:
+                    patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
+                df = df[
+                    df["lugar_ejecucion"].str.contains(
+                        patron_regex, case=False, na=False, regex=True
+                    )
+                ]
+
+            if not df.empty and filtro_lugar_libre.strip():
+                df = df[
+                    df["lugar_ejecucion"].str.contains(
+                        filtro_lugar_libre.strip(), case=False, na=False
+                    )
+                ]
+
+            if not df.empty and filtro_cpv_sector != "🌐 Todos los sectores CPV":
+                prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
+
+                def coincide_cpv(cpv_str):
+                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                        return False
+                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+                    return any(c.startswith(prefijos_validos) for c in lista_cpv)
+
+                if "cpv" in df.columns:
+                    df = df[df["cpv"].apply(coincide_cpv)]
+
+            if not df.empty and filtro_cpv_codigo.strip():
+                codigo_busqueda = filtro_cpv_codigo.strip()
+
+                def coincide_codigo_cpv(cpv_str):
+                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                        return False
+                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+                    return any(codigo_busqueda in c for c in lista_cpv)
+
+                if "cpv" in df.columns:
+                    df = df[df["cpv"].apply(coincide_codigo_cpv)]
+
+            if not df.empty and usar_filtro_cierre:
+
+                def filtrar_fecha_fin(f_str):
+                    if not f_str:
+                        return False
+                    try:
+                        return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+                    except ValueError:
+                        return False
+
+                if "fecha_fin" in df.columns:
+                    df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
+
+            if not df.empty and usar_filtro_fechas:
+
+                def filtrar_fecha_pub(f_str):
+                    if not f_str:
+                        return False
+                    try:
+                        return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
+                    except ValueError:
+                        return False
+
+                if "fecha" in df.columns:
+                    df = df[df["fecha"].apply(filtrar_fecha_pub)]
+
+            if not df.empty and not mostrar_todos:
+                df = df.head(limite_resultados)
+
+            if df.empty:
+                st.warning("No se encontraron resultados con los filtros indicados.")
+            else:
+                st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
+                st.markdown(
+                    "🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones"
+                    " Actualizadas"
+                )
+
+                tabla_final = []
+                for idx, row in enumerate(df.itertuples(), start=1):
+                    tabla_final.append({
+                        "#": idx,
+                        "Relevancia (%)": f"{getattr(row, 'relevancia', 100.0):.2f} %",
+                        "Título": row.titulo,
+                        "Órgano": row.organo,
+                        "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
+                        "Cierre": getattr(row, "fecha_fin", "No especificada"),
+                        "Fecha Pub.": row.fecha,
+                        "Importe": f"{row.importe:,.2f} €",
+                        "Enlace": row.enlace,
+                        "Es Novedad": getattr(row, "es_novedad", False),
+                        "Es Actualizada": getattr(row, "es_actualizada", False),
+                    })
+
+                df_final = pd.DataFrame(tabla_final)
+
+                st.dataframe(
+                    df_final.style.apply(estilizar_filas, axis=1),
+                    column_config={
+                        "Enlace": st.column_config.LinkColumn(
+                            "Enlace oficial", display_text="Ver licitación 🔗"
+                        ),
+                        "Es Novedad": None,
+                        "Es Actualizada": None,
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                )
