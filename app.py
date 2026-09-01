@@ -542,7 +542,7 @@ elif btn_buscar:
                 .order("fecha", desc=True)
             )
             if not mostrar_todos:
-                query_sup = query_sup.limit(100)
+                query_sup = query_sup.limit(500)
 
             response = query_sup.execute()
             resultados = response.data
