@@ -324,7 +324,7 @@ if st.session_state.resultados_acumulados:
     df_final = pd.DataFrame(tabla_final)
     st.dataframe(
         df_final,
-        column_config={"Enlace": st.column_config.LinkColumn("Enlace oficial", display_text="Ver 🔗")},
+        column_config={"Enlace": st.column_config.LinkColumn("Enlace oficial", display_text="Ver licitación 🔗")},
         hide_index=True,
         use_container_width=True,
     )
