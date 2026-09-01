@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 from supabase import Client, create_client
 
 # Desactivar traductor automático del navegador
-st.markdown(
+st.markdown( 
     """
     <head>
         <meta name="google" content="notranslate">
