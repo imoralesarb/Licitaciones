@@ -358,8 +358,14 @@ consulta_texto = st.text_input(
 
 # Panel de filtros avanzados
 st.markdown("### ⚙️ Filtros avanzados")
-col1, col2, col3, col4 = st.columns(4)
+col0, col1, col2, col3, col4 = st.columns(5)
 
+with col0:
+    filtro_fuente = st.selectbox(
+        "🌐 Fuente",
+        ["🌐 Todas las fuentes", "PLACSP", "Gobcan", "Cabildo Tenerife"],
+        key="filtro_fuente",
+    )
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
 with col2:
@@ -584,7 +590,10 @@ elif btn_buscar:
             else:
                 df["relevancia"] = 100.0
 
-            # Filtros en Pandas (Importe, CCAA, CPV, Fechas...)
+            # Filtros en Pandas (Fuente, Importe, CCAA, CPV, Fechas...)
+            if not df.empty and filtro_fuente != "🌐 Todas las fuentes":
+                df = df[df["fuente"] == filtro_fuente]
+
             if not df.empty and importe_min > 0:
                 df = df[df["importe"] >= importe_min]
             if not df.empty and importe_max > 0:
