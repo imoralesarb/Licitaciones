@@ -190,15 +190,32 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
 
                 fecha_str = txt_fecha.split("T")[0]
 
+               
                 end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
                 fecha_fin_str = "No especificada"
                 if end_date_el is not None and end_date_el.text:
                     fecha_fin_str = end_date_el.text.strip()[:10]
                     try:
-                        if datetime.strptime(fecha_fin_str, "%Y-%m-%d").date() < hoy:
+                        fecha_fin = datetime.strptime(
+                            fecha_fin_str,
+                            "%Y-%m-%d"
+                        ).date()
+
+                        if fecha_fin < hoy:
+                            print(f"🗑️ Licitación caducada detectada: {enlace}")
+                            try:
+                                supabase.table("licitaciones") \
+                                    .delete() \
+                                    .eq("enlace", enlace) \
+                                    .execute()
+                            except Exception as e:
+                                print(f"⚠️ No se pudo eliminar la licitación caducada: {e}")
+
                             continue
+
                     except Exception:
                         pass
+
 
                 titulo = _texto(entry, "atom:title") or "Sin título"
                 expediente_id = _texto(entry, ".//cbc:ContractFolderID", NS) or enlace
