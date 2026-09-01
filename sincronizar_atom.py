@@ -30,7 +30,7 @@ FEEDS_ATOM = [
     },
 ]
 
-MAX_PAGINAS = 15
+MAX_PAGINAS = 25
 
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
