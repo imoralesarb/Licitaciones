@@ -73,7 +73,7 @@ with st.spinner("Cargando modelo de IA..."):
 @st.cache_data(ttl=600)
 def obtener_novedades_supabase():
     todos_los_datos = []
-    tamano_lote = 1000
+    tamano_lote = 100000
     inicio = 0
 
     while True:
