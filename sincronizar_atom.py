@@ -21,7 +21,7 @@ encoder = SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
 
 FEEDS_ATOM = [
     {
-        "nombre": "Licitaciones Generales",
+        "nombre": "Licitaciones Generales PLACSP",
         "url": "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom",
     },
     {
