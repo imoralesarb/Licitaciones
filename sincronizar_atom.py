@@ -31,7 +31,7 @@ FEEDS_ATOM = [
     },
 ]
 
-MAX_PAGINAS = 25
+MAX_PAGINAS = 15
 
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -137,34 +137,12 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     sesion = crear_sesion_robusta()
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-    ultimo_conocido = obtener_ultimo_enlace(nombre_feed)
     estados_cerrados = ["EV", "ADJ", "RES", "ANUL", "FOR", "AS", "RE", "CAN"]
-
-    urls_por_dia = {}
-    dia_actual_str = None
-    urls_visitadas_orden = []
 
     while url_actual and paginas_procesadas < MAX_PAGINAS:
         paginas_procesadas += 1
 
-        if ultimo_conocido and url_actual == ultimo_conocido:
-            print(f"🛑 Encontrado el enlace límite conocido ({url_actual}). Deteniendo lectura histórica.")
-            break
-
         print(f"📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
-        urls_visitadas_orden.append(url_actual)
-
-        fecha_url = extraer_fecha_de_url(url_actual)
-        if paginas_procesadas == 1:
-            dia_actual_str = fecha_url or datetime.now().strftime("%Y%m%d")
-            print(f"📅 Día principal actual detectado por URL: {dia_actual_str}")
-        else:
-            if not fecha_url:
-                fecha_url = dia_actual_str
-
-            if fecha_url not in urls_por_dia:
-                urls_por_dia[fecha_url] = []
-            urls_por_dia[fecha_url].append(url_actual)
 
         try:
             resp = sesion.get(url_actual, headers=headers, timeout=30)
@@ -247,38 +225,14 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     pass
 
                 importe = 0.0
-
                 try:
-                    presupuesto_el = entry.find(
-                        ".//cac:BudgetAmount/"
-                        "cbc:EstimatedOverallContractAmount",
-                        NS
-                    )
-                
+                    presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS)
                     if presupuesto_el is None:
-                        presupuesto_el = entry.find(
-                            ".//cac:BudgetAmount/"
-                            "cbc:TaxExclusiveAmount",
-                            NS
-                        )
-                
+                        presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TaxExclusiveAmount", NS)
                     if presupuesto_el is None:
-                        presupuesto_el = entry.find(
-                            ".//cac:BudgetAmount/"
-                            "cbc:TotalAmount",
-                            NS
-                        )
-                
-                    if (
-                        presupuesto_el is not None
-                        and presupuesto_el.text
-                    ):
-                        importe = float(
-                            presupuesto_el.text
-                            .strip()
-                            .replace(",", ".")
-                        )
-                
+                        presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:TotalAmount", NS)
+                    if presupuesto_el is not None and presupuesto_el.text:
+                        importe = float(presupuesto_el.text.strip().replace(",", "."))
                 except Exception:
                     pass
 
@@ -321,33 +275,11 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             if url_actual and "contrataciondelestado.es" in url_actual:
                 url_actual = url_actual.replace("contrataciondelestado.es", "contrataciondelsectorpublico.gob.es")
 
-            dias_distintos = [d for d in urls_por_dia.keys() if d != dia_actual_str]
-            if len(dias_distintos) >= 2:
-                print(f"🛑 Registrados 2 días cerrados completos. Deteniendo paginación.")
-                break
-
             time.sleep(1)
         except Exception as e:
             print(f"❌ Error de red: {e}. Reintentando...")
             time.sleep(10)
             continue
-
-    dias_registrados = sorted([d for d in urls_por_dia.keys() if d != dia_actual_str], reverse=True)
-
-    enlace_a_guardar = None
-    if len(dias_registrados) >= 2:
-        dia_objetivo = dias_registrados[1]
-        lista_urls_dia = urls_por_dia[dia_objetivo]
-        enlace_a_guardar = lista_urls_dia[0] if lista_urls_dia else None
-    elif dias_registrados:
-        enlace_a_guardar = urls_por_dia[dias_registrados[0]][0]
-
-    if not enlace_a_guardar and urls_visitadas_orden:
-        enlace_a_guardar = urls_visitadas_orden[-1]
-
-    if enlace_a_guardar:
-        print(f"💾 Guardando nuevo enlace límite seguro para futuras ejecuciones: {enlace_a_guardar}")
-        guardar_ultimo_enlace(nombre_feed, enlace_a_guardar)
 
     for item in licitaciones_por_expediente.values():
         item.pop("_atom_updated", None)
