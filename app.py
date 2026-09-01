@@ -250,26 +250,6 @@ MAPA_TERRITORIAL = {
     "📍 La Rioja": ["La Rioja", "Logroño"],
     "📍 Ceuta": ["Ceuta"],
     "📍 Melilla": ["Melilla"],
-    "🌐 Todas las CCAA / Ubicaciones": "",
-    "📍 Andalucía": "Andalucía",
-    "📍 Aragón": "Aragón",
-    "📍 Asturias": "Asturias",
-    "📍 Illes Balears / Islas Baleares": "Baleares",
-    "📍 Canarias": "Canarias",
-    "📍 Cantabria": "Cantabria",
-    "📍 Castilla-La Mancha": "Castilla-La Mancha",
-    "📍 Castilla y León": "Castilla y León",
-    "📍 Cataluña / Catalunya": "Cataluña",
-    "📍 Comunitat Valenciana": "Valenciana",
-    "📍 Extremadura": "Extremadura",
-    "📍 Galicia": "Galicia",
-    "📍 Madrid (Comunidad de)": "Madrid",
-    "📍 Murcia (Región de)": "Murcia",
-    "📍 Navarra": "Navarra",
-    "📍 País Vasco / Euskadi": "País Vasco",
-    "📍 La Rioja": "La Rioja",
-    "📍 Ceuta": "Ceuta",
-    "📍 Melilla": "Melilla",
 }
 
 SECTORES_CPV = {
@@ -333,7 +313,6 @@ SECTORES_CPV = {
         "92",
         "98",
     ],
-    "🌐 Todos los sectores CPV": "",
 }
 
 # 4. Interfaz Visual
@@ -442,17 +421,21 @@ def ejecutar_consulta_rpc(offset):
     else:
         vector_query = [0.0]
 
-    # Resolver lugar definitivo (prioriza el campo libre si está escrito, si no usa la lista de la CCAA)
+    # Resolver lugar definitivo garantizando que sea una lista válida
+    lugar_final = []
     if filtro_lugar_libre.strip():
         lugar_final = [filtro_lugar_libre.strip()]
-    else:
-        lugar_final = MAPA_TERRITORIAL.get(filtro_ccaa, [])
+    elif filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
+        val_map = MAPA_TERRITORIAL.get(filtro_ccaa, [])
+        lugar_final = [val_map] if isinstance(val_map, str) else val_map
 
-    # Resolver CPV definitivo (prioriza el código escrito, si no usa la lista del sector)
+    # Resolver CPV definitivo garantizando que sea una lista válida
+    cpv_final = []
     if filtro_cpv_codigo.strip():
         cpv_final = [filtro_cpv_codigo.strip()]
-    else:
-        cpv_final = SECTORES_CPV.get(filtro_cpv_sector, [])
+    elif filtro_cpv_sector != "🌐 Todos los sectores CPV":
+        val_cpv = SECTORES_CPV.get(filtro_cpv_sector, [])
+        cpv_final = [val_cpv] if isinstance(val_cpv, str) else val_cpv
 
     try:
         response = supabase.rpc(
