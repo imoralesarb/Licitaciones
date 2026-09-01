@@ -31,6 +31,8 @@ FEEDS_ATOM = [
 ]
 
 MAX_PAGINAS = 25
+# Número de páginas hacia atrás que dejaremos de margen para asegurar estabilidad (ej. página 5 o 6)
+PAGINA_OBJETIVO_MARGEN = 5
 
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -118,7 +120,7 @@ def guardar_ultimo_enlace(nombre_feed, enlace):
         print(f"⚠️ No se pudo guardar el puntero de sincronización: {e}")
 
 # ============================================================
-# 3. PROCESAMIENTO DEL FEED CON CORTE INTELIGENTE POR PÁGINA 2
+# 3. PROCESAMIENTO DEL FEED CON CORTE INTELIGENTE POR MARGEN
 # ============================================================
 
 def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
@@ -130,7 +132,7 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     ultimo_conocido = obtener_ultimo_enlace(nombre_feed)
-    enlace_pagina_2 = None
+    enlace_para_guardar = None
     parar_extraccion = False
 
     estados_cerrados = ["EV", "ADJ", "RES", "ANUL", "FOR", "AS", "RE", "CAN"]
@@ -138,9 +140,9 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     while url_actual and paginas_procesadas < MAX_PAGINAS and not parar_extraccion:
         paginas_procesadas += 1
 
-        # Si llegamos a la página 2 y coincide con la URL guardada en la ejecución anterior, detenemos
-        if paginas_procesadas == 2 and ultimo_conocido and url_actual == ultimo_conocido:
-            print(f"🛑 Encontrada la página 2 ya conocida ({url_actual}). Deteniendo lectura de páginas históricas.")
+        # Si llegamos a la página marcada como límite seguro y coincide con la guardada, detenemos
+        if paginas_procesadas == PAGINA_OBJETIVO_MARGEN and ultimo_conocido and url_actual == ultimo_conocido:
+            print(f"🛑 Encontrada la página límite segura ya conocida ({url_actual}). Deteniendo lectura histórica.")
             break
 
         print(f"📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
@@ -155,9 +157,9 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             if not entries:
                 break
 
-            # Guardamos la URL exacta de la página 2 cuando estemos en ella
-            if paginas_procesadas == 2:
-                enlace_pagina_2 = url_actual
+            # Guardamos la URL actual cuando alcancemos la página establecida como margen seguro
+            if paginas_procesadas == PAGINA_OBJETIVO_MARGEN:
+                enlace_para_guardar = url_actual
 
             for index, entry in enumerate(entries):
                 enlace_el = entry.find("atom:link", NS)
@@ -281,8 +283,12 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             time.sleep(10)
             continue
 
-    if enlace_pagina_2:
-        guardar_ultimo_enlace(nombre_feed, enlace_pagina_2)
+    # Si por alguna razón el bucle terminó antes de llegar a la página objetivo, guardamos la última alcanzada
+    if not enlace_para_guardar and url_actual:
+        enlace_para_guardar = url_actual
+
+    if enlace_para_guardar:
+        guardar_ultimo_enlace(nombre_feed, enlace_para_guardar)
 
     for item in licitaciones_por_expediente.values():
         item.pop("_atom_updated", None)
