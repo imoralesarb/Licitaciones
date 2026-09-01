@@ -509,49 +509,67 @@ if btn_novedades:
                 )
 
 # 6. Lógica de Búsqueda Principal vía Supabase RPC (Independiente de Novedades)
-# 6. Lógica de Búsqueda Principal modificada para evitar el problema de filtros vacíos
 elif btn_buscar:
     with st.spinner("Buscando en Supabase..."):
         resultados = []
         consulta_texto_val = consulta_texto if 'consulta_texto' in locals() else ""
 
+        # ESCENARIO A: Búsqueda Semántica con Texto
         if consulta_texto_val.strip():
             query_con_prefijo = f"query: {consulta_texto_val.strip()}"
             vector_query = encoder.encode(query_con_prefijo).tolist()
 
-            # CORRECCIÓN: Si el usuario usa filtros de fecha o un límite alto, 
-            # aumentamos el match_count para que no se pierdan registros en el filtrado de Pandas.
-            match_count_dinamico = 999999 if (mostrar_todos or usar_filtro_fechas or usar_filtro_cierre) else max(limite_resultados * 10, 200)
+            # Si el usuario quiere ver todo o usa filtros complejos, pedimos un match_count masivo
+            match_count_deseado = 999999 if (mostrar_todos or usar_filtro_fechas or usar_filtro_cierre) else max(limite_resultados * 3, 50)
 
             try:
                 response = supabase.rpc(
                     "buscar_licitaciones",
                     {
                         "query_embedding": vector_query,
-                        "match_threshold": 0.2,  # Opcional: bajado ligeramente para capturar más afinidad
-                        "match_count": match_count_dinamico
+                        "match_threshold": 0.2,
+                        "match_count": match_count_deseado
                     },
                 ).execute()
                 resultados = response.data
             except Exception as e:
                 st.error(f"⚠️ Error al ejecutar la búsqueda vectorial: {e}")
-        else:
-            query_sup = (
-                supabase.table("licitaciones")
-                .select(
-                    "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
-                    " fecha_fin, texto_completo, cpv, fuente, es_novedad, es_actualizada"
-                )
-                .order("fecha", desc=True)
-            )
-            # Si hay filtros activos de fecha, evitamos limitar a 500 para no cortar la fecha buscada
-            if not mostrar_todos and not usar_filtro_fechas:
-                query_sup = query_sup.limit(500)
-            elif mostrar_todos:
-                query_sup = query_sup.limit(5000)
 
-            response = query_sup.execute()
-            resultados = response.data
+        # ESCENARIO B: Búsqueda general sin texto (Descarga por lotes de toda la tabla)
+        else:
+            todos_los_datos = []
+            tamano_lote = 1000
+            inicio = 0
+
+            while True:
+                query_sup = (
+                    supabase.table("licitaciones")
+                    .select(
+                        "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
+                        " fecha_fin, texto_completo, cpv, fuente, es_novedad, es_actualizada"
+                    )
+                    .order("fecha", desc=True)
+                    .range(inicio, inicio + tamano_lote - 1)
+                )
+                
+                response = query_sup.execute()
+                filas = response.data
+                
+                if not filas:
+                    break
+                
+                todos_los_datos.extend(filas)
+                
+                # Si es una búsqueda rápida sin filtros complejos, cortamos en el primer lote
+                if not mostrar_todos and not usar_filtro_fechas and not usar_filtro_cierre:
+                    break
+                    
+                if len(filas) < tamano_lote:
+                    break
+                    
+                inicio += tamano_lote
+
+            resultados = todos_los_datos
             for r in resultados:
                 r["similarity"] = 1.0
 
