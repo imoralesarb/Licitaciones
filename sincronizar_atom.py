@@ -1,6 +1,3 @@
-Modificación de la lógica para registrar y comprobar la **URL de la página 2** (el primer archivo estático con marca de tiempo), evitando así recorrer innecesariamente el historial estático en cada ejecución:
-
-```python
 from datetime import date, datetime
 import os
 import lxml.etree as ET
@@ -338,5 +335,3 @@ if todas_licitaciones:
     print("✅ ¡Carga, control de paginación y reseteo completados con éxito!")
 else:
     print("ℹ️ No hay licitaciones nuevas que procesar en esta ejecución.")
-
-```
