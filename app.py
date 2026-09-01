@@ -81,7 +81,7 @@ def obtener_novedades_supabase():
             supabase.table("licitaciones")
             .select(
                 "titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin,"
-                " cpv, es_novedad, es_actualizada"
+                " cpv, fuente, es_novedad, es_actualizada"
             )
             .range(inicio, inicio + tamano_lote - 1)
             .execute()
@@ -326,6 +326,7 @@ st.title("🔍 Buscador inteligente de Licitaciones")
 
 def limpiar_campos():
     st.session_state.consulta_texto = ""
+    st.session_state.filtro_fuente = "🌐 Todas las fuentes"
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_lugar_libre = ""
     st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
@@ -347,7 +348,18 @@ consulta_texto = st.text_input(
 
 # Panel de filtros avanzados
 st.markdown("### ⚙️ Filtros avanzados")
-col1, col2, col3, col4 = st.columns(4)
+col0, col1, col2, col3, col4 = st.columns(5)
+
+with col0:
+    # Obtener fuentes únicas de Supabase de manera dinámica para el desplegable (con caché o consulta rápida)
+    try:
+        resp_fuentes = supabase.table("licitaciones").select("fuente").execute()
+        lista_fuentes_db = sorted(list(set(item["fuente"] for item in resp_fuentes.data if item.get("fuente"))))
+    except Exception:
+        lista_fuentes_db = []
+    
+    opciones_fuente = ["🌐 Todas las fuentes"] + lista_fuentes_db
+    filtro_fuente = st.selectbox("📂 Fuente", opciones_fuente, key="filtro_fuente")
 
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
@@ -459,8 +471,12 @@ if btn_novedades:
             df = pd.DataFrame(data)
             df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
 
+            # Filtrar por fuente seleccionada si aplica
+            if filtro_fuente != "🌐 Todas las fuentes" and "fuente" in df.columns:
+                df = df[df["fuente"] == filtro_fuente]
+
             if df.empty:
-                st.info("No hay nuevas licitaciones ni actualizaciones en este ciclo.")
+                st.info("No hay nuevas licitaciones ni actualizaciones en este ciclo con los filtros seleccionados.")
             else:
                 st.success(
                     f"¡Se han encontrado {len(df)} licitaciones nuevas o actualizadas!"
@@ -481,7 +497,6 @@ if btn_novedades:
                         "Fecha Pub.": row.fecha,
                         "Importe": f"{row.importe:,.2f} €",
                         "Enlace": row.enlace,
-                        # Se conservan las columnas para el color, pero se ocultan mediante subset al mostrar el dataframe
                         "Es Novedad": getattr(row, "es_novedad", False),
                         "Es Actualizada": getattr(row, "es_actualizada", False),
                     })
@@ -494,7 +509,6 @@ if btn_novedades:
                         "Enlace": st.column_config.LinkColumn(
                             "Enlace oficial", display_text="Ver licitación 🔗"
                         ),
-                        # Ocultar visualmente las columnas de control de color sin romper el estilo
                         "Es Novedad": None,
                         "Es Actualizada": None,
                     },
@@ -530,7 +544,7 @@ elif btn_buscar:
                 supabase.table("licitaciones")
                 .select(
                     "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
-                    " fecha_fin, texto_completo, cpv, es_novedad, es_actualizada"
+                    " fecha_fin, texto_completo, cpv, fuente, es_novedad, es_actualizada"
                 )
                 .order("fecha", desc=True)
             )
@@ -553,7 +567,10 @@ elif btn_buscar:
             else:
                 df["relevancia"] = 100.0
 
-            # Filtros en Pandas (Importe, CCAA, CPV, Fechas...)
+            # Filtros en Pandas (Fuente, Importe, CCAA, CPV, Fechas...)
+            if not df.empty and filtro_fuente != "🌐 Todas las fuentes" and "fuente" in df.columns:
+                df = df[df["fuente"] == filtro_fuente]
+
             if not df.empty and importe_min > 0:
                 df = df[df["importe"] >= importe_min]
             if not df.empty and importe_max > 0:
