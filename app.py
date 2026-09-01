@@ -509,6 +509,7 @@ if btn_novedades:
                 )
 
 # 6. Lógica de Búsqueda Principal vía Supabase RPC (Independiente de Novedades)
+# 6. Lógica de Búsqueda Principal modificada para evitar el problema de filtros vacíos
 elif btn_buscar:
     with st.spinner("Buscando en Supabase..."):
         resultados = []
@@ -518,15 +519,17 @@ elif btn_buscar:
             query_con_prefijo = f"query: {consulta_texto_val.strip()}"
             vector_query = encoder.encode(query_con_prefijo).tolist()
 
+            # CORRECCIÓN: Si el usuario usa filtros de fecha o un límite alto, 
+            # aumentamos el match_count para que no se pierdan registros en el filtrado de Pandas.
+            match_count_dinamico = 999999 if (mostrar_todos or usar_filtro_fechas or usar_filtro_cierre) else max(limite_resultados * 10, 200)
+
             try:
                 response = supabase.rpc(
                     "buscar_licitaciones",
                     {
                         "query_embedding": vector_query,
-                        "match_threshold": 0.3,
-                        "match_count": 999999
-                        if mostrar_todos
-                        else max(limite_resultados * 3, 50),
+                        "match_threshold": 0.2,  # Opcional: bajado ligeramente para capturar más afinidad
+                        "match_count": match_count_dinamico
                     },
                 ).execute()
                 resultados = response.data
@@ -541,8 +544,11 @@ elif btn_buscar:
                 )
                 .order("fecha", desc=True)
             )
-            if not mostrar_todos:
+            # Si hay filtros activos de fecha, evitamos limitar a 500 para no cortar la fecha buscada
+            if not mostrar_todos and not usar_filtro_fechas:
                 query_sup = query_sup.limit(500)
+            elif mostrar_todos:
+                query_sup = query_sup.limit(5000)
 
             response = query_sup.execute()
             resultados = response.data
