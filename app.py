@@ -334,13 +334,6 @@ SECTORES_CPV = {
         "98",
     ],
     "🌐 Todos los sectores CPV": "",
-    "Agricultura, alimentación y materias primas": "03",
-    "Textil, industria y maquinaria": "18",
-    "Construcción, agua y energía": "45",
-    "Servicios generales a empresas": "50",
-    "Transporte y telecomunicaciones": "60",
-    "Servicios financieros y profesionales": "66",
-    "Educación, sanidad y medio ambiente": "80",
 }
 
 # 4. Interfaz Visual
