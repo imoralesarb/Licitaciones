@@ -1,3 +1,6 @@
+Modificación de la lógica para registrar y comprobar la **URL de la página 2** (el primer archivo estático con marca de tiempo), evitando así recorrer innecesariamente el historial estático en cada ejecución:
+
+```python
 from datetime import date, datetime
 import os
 import lxml.etree as ET
@@ -118,7 +121,7 @@ def guardar_ultimo_enlace(nombre_feed, enlace):
         print(f"⚠️ No se pudo guardar el puntero de sincronización: {e}")
 
 # ============================================================
-# 3. PROCESAMIENTO DEL FEED CON CORTE INTELIGENTE
+# 3. PROCESAMIENTO DEL FEED CON CORTE INTELIGENTE POR PÁGINA 2
 # ============================================================
 
 def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
@@ -130,14 +133,19 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     ultimo_conocido = obtener_ultimo_enlace(nombre_feed)
-    primer_enlace_esta_pagina = None
+    enlace_pagina_2 = None
     parar_extraccion = False
 
-    # Únicamente consideramos estados de cierre definitivo para borrarlas o ignorarlas
     estados_cerrados = ["EV", "ADJ", "RES", "ANUL", "FOR", "AS", "RE", "CAN"]
 
     while url_actual and paginas_procesadas < MAX_PAGINAS and not parar_extraccion:
         paginas_procesadas += 1
+
+        # Si llegamos a la página 2 y coincide con la URL guardada en la ejecución anterior, detenemos
+        if paginas_procesadas == 2 and ultimo_conocido and url_actual == ultimo_conocido:
+            print(f"🛑 Encontrada la página 2 ya conocida ({url_actual}). Deteniendo lectura de páginas históricas.")
+            break
+
         print(f"📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
         try:
             resp = sesion.get(url_actual, headers=headers, timeout=30)
@@ -150,6 +158,10 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             if not entries:
                 break
 
+            # Guardamos la URL exacta de la página 2 cuando estemos en ella
+            if paginas_procesadas == 2:
+                enlace_pagina_2 = url_actual
+
             for index, entry in enumerate(entries):
                 enlace_el = entry.find("atom:link", NS)
                 enlace = enlace_el.get("href") if enlace_el is not None else ""
@@ -157,15 +169,6 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     enlace = enlace.replace("contrataciondelestado.es", "contrataciondelsectorpublico.gob.es")
                 enlace = enlace.strip()
 
-                if paginas_procesadas == 1 and index == 0:
-                    primer_enlace_esta_pagina = enlace
-
-                if ultimo_conocido and enlace == ultimo_conocido:
-                    print(f"🛑 Encontrado el límite de la ejecución anterior ({enlace}). Deteniendo lectura de páginas.")
-                    parar_extraccion = True
-                    break
-
-                # Leer estado actual del ATOM (por defecto asumimos activo si no especifica nada)
                 codigo_estado = "PUB"
                 try:
                     estado_el = entry.find(".//cbc-place-ext:ContractFolderStatusCode", NS) or entry.find(".//cbc:ContractFolderStatusCode", NS)
@@ -174,7 +177,6 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                 except Exception:
                     pass
 
-                # SI EL ESTADO ES CERRADO: La eliminamos de Supabase si ya existía y pasamos de largo
                 if codigo_estado in estados_cerrados:
                     try:
                         supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
@@ -190,32 +192,21 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
 
                 fecha_str = txt_fecha.split("T")[0]
 
-               
                 end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
                 fecha_fin_str = "No especificada"
                 if end_date_el is not None and end_date_el.text:
                     fecha_fin_str = end_date_el.text.strip()[:10]
                     try:
-                        fecha_fin = datetime.strptime(
-                            fecha_fin_str,
-                            "%Y-%m-%d"
-                        ).date()
-
+                        fecha_fin = datetime.strptime(fecha_fin_str, "%Y-%m-%d").date()
                         if fecha_fin < hoy:
                             print(f"🗑️ Licitación caducada detectada: {enlace}")
                             try:
-                                supabase.table("licitaciones") \
-                                    .delete() \
-                                    .eq("enlace", enlace) \
-                                    .execute()
+                                supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
                             except Exception as e:
                                 print(f"⚠️ No se pudo eliminar la licitación caducada: {e}")
-
                             continue
-
                     except Exception:
                         pass
-
 
                 titulo = _texto(entry, "atom:title") or "Sin título"
                 expediente_id = _texto(entry, ".//cbc:ContractFolderID", NS) or enlace
@@ -282,9 +273,6 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                 if expediente_id not in licitaciones_por_expediente or licitacion_data["_atom_updated"] > licitaciones_por_expediente[expediente_id]["_atom_updated"]:
                     licitaciones_por_expediente[expediente_id] = licitacion_data
 
-            if parar_extraccion:
-                break
-
             next_link_el = root.find("atom:link[@rel='next']", NS) or root.find(".//{http://www.w3.org/2005/Atom}link[@rel='next']")
             url_actual = next_link_el.get("href") if next_link_el is not None else None
             if url_actual and "contrataciondelestado.es" in url_actual:
@@ -296,8 +284,8 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             time.sleep(10)
             continue
 
-    if primer_enlace_esta_pagina:
-        guardar_ultimo_enlace(nombre_feed, primer_enlace_esta_pagina)
+    if enlace_pagina_2:
+        guardar_ultimo_enlace(nombre_feed, enlace_pagina_2)
 
     for item in licitaciones_por_expediente.values():
         item.pop("_atom_updated", None)
@@ -350,3 +338,5 @@ if todas_licitaciones:
     print("✅ ¡Carga, control de paginación y reseteo completados con éxito!")
 else:
     print("ℹ️ No hay licitaciones nuevas que procesar en esta ejecución.")
+
+```
