@@ -521,53 +521,40 @@ elif btn_buscar:
     with st.spinner("Buscando en Supabase..."):
         resultados = []
 
+        # Comprobamos si hay texto de búsqueda
         if consulta_texto.strip():
             query_con_prefijo = f"query: {consulta_texto.strip()}"
             vector_query = encoder.encode(query_con_prefijo).tolist()
-
-            try:
-                response = supabase.rpc(
-                    "buscar_licitaciones",
-                    {
-                        "query_embedding": vector_query,
-                        "match_threshold": 0.3,
-                        "match_count": 999999
-                        if mostrar_todos
-                        else max(limite_resultados * 3, 50),
-                    },
-                ).execute()
-                resultados = response.data
-            except Exception as e:
-                st.error(f"⚠️ Error al ejecutar la búsqueda vectorial: {e}")
         else:
-            query_sup = (
-                supabase.table("licitaciones")
-                .select(
-                    "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
-                    " fecha_fin, texto_completo, cpv, fuente, es_novedad, es_actualizada"
-                )
-                .order("fecha", desc=True)
-            )
-            if not mostrar_todos:
-                query_sup = query_sup.limit(100)
+            # Si no hay texto, usamos un vector neutral (ceros) para que la función RPC 
+            # devuelva registros sin depender de una similitud semántica de texto.
+            # (Asegúrate de que el tamaño coincida con tu modelo, ej: 384 para multilingual-e5-small)
+            vector_query = [0.0] * 384 
 
-            response = query_sup.execute()
+        try:
+            response = supabase.rpc(
+                "buscar_licitaciones",
+                {
+                    "query_embedding": vector_query,
+                    # Si no hay texto, bajamos el umbral a 0 para no descartar nada por similitud
+                    "match_threshold": 0.0 if not consulta_texto.strip() else 0.3,
+                    "match_count": 999999 if mostrar_todos else 1000,
+                },
+            ).execute()
             resultados = response.data
-            for r in resultados:
-                r["similarity"] = 1.0
+        except Exception as e:
+            st.error(f"⚠️ Error al ejecutar la búsqueda: {e}")
 
         if not resultados:
-            st.warning(
-                "No se encontraron resultados que coincidan con la búsqueda."
-            )
+            st.warning("No se encontraron resultados con los filtros indicados.")
         else:
             df = pd.DataFrame(resultados)
-            if "similarity" in df.columns:
+            if "similarity" in df.columns and consulta_texto.strip():
                 df["relevancia"] = (df["similarity"] * 100).round(2)
             else:
                 df["relevancia"] = 100.0
 
-            # Filtros en Pandas (Fuente, Importe, CCAA, CPV, Fechas...)
+            # --- A partir de aquí siguen tus filtros de Pandas habituales ---
             if not df.empty and filtro_fuente != "🌐 Todas las fuentes" and "fuente" in df.columns:
                 df = df[df["fuente"] == filtro_fuente]
 
@@ -575,6 +562,8 @@ elif btn_buscar:
                 df = df[df["importe"] >= importe_min]
             if not df.empty and importe_max > 0:
                 df = df[df["importe"] <= importe_max]
+
+            # (Resto de filtros de CCAA, CPV y Fechas que ya tienes...)
 
             if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
                 palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
