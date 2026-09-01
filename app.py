@@ -363,7 +363,7 @@ col0, col1, col2, col3, col4 = st.columns(5)
 with col0:
     filtro_fuente = st.selectbox(
         "🌐 Fuente",
-        ["🌐 Todas las fuentes", "PLACSP", "Gobcan", "Cabildo Tenerife"],
+        ["🌐 Todas las fuentes", "Licitaciones Generales PLACSP", "TED"],
         key="filtro_fuente",
     )
 with col1:
