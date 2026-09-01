@@ -442,15 +442,17 @@ def ejecutar_consulta_rpc(offset):
     else:
         vector_query = [0.0]
 
-    # Resolver lugar definitivo
-    lugar_final = filtro_lugar_libre.strip()
-    if not lugar_final and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
-        lugar_final = MAPA_TERRITORIAL[filtro_ccaa]
+    # Resolver lugar definitivo (prioriza el campo libre si está escrito, si no usa la lista de la CCAA)
+    if filtro_lugar_libre.strip():
+        lugar_final = [filtro_lugar_libre.strip()]
+    else:
+        lugar_final = MAPA_TERRITORIAL.get(filtro_ccaa, [])
 
-    # Resolver CPV definitivo
-    cpv_final = filtro_cpv_codigo.strip()
-    if not cpv_final and filtro_cpv_sector != "🌐 Todos los sectores CPV":
-        cpv_final = SECTORES_CPV[filtro_cpv_sector]
+    # Resolver CPV definitivo (prioriza el código escrito, si no usa la lista del sector)
+    if filtro_cpv_codigo.strip():
+        cpv_final = [filtro_cpv_codigo.strip()]
+    else:
+        cpv_final = SECTORES_CPV.get(filtro_cpv_sector, [])
 
     try:
         response = supabase.rpc(
