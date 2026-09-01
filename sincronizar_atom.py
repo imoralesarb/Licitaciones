@@ -1,5 +1,6 @@
 from datetime import date, datetime
 import os
+import re
 import lxml.etree as ET
 from requests.adapters import HTTPAdapter
 from sentence_transformers import SentenceTransformer
@@ -31,8 +32,6 @@ FEEDS_ATOM = [
 ]
 
 MAX_PAGINAS = 25
-# Número de páginas hacia atrás que dejaremos de margen para asegurar estabilidad (ej. página 5 o 6)
-PAGINA_OBJETIVO_MARGEN = 5
 
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -84,6 +83,13 @@ def _texto(el, xpath, ns=NS):
     nodo = el.find(xpath, ns)
     return nodo.text.strip() if nodo is not None and nodo.text else None
 
+def extraer_fecha_de_url(url):
+    """Extrae la fecha en formato YYYYMMDD del nombre de archivo del enlace Atom si existe."""
+    match = re.search(r'_(\d{8})_\d{6}', url)
+    if match:
+        return match.group(1)
+    return None
+
 def limpiar_licitaciones_caducadas():
     hoy_str = date.today().strftime("%Y-%m-%d")
     try:
@@ -120,7 +126,7 @@ def guardar_ultimo_enlace(nombre_feed, enlace):
         print(f"⚠️ No se pudo guardar el puntero de sincronización: {e}")
 
 # ============================================================
-# 3. PROCESAMIENTO DEL FEED CON CORTE INTELIGENTE POR MARGEN
+# 3. PROCESAMIENTO DEL FEED CON DETECCIÓN POR NOMBRE DE URL
 # ============================================================
 
 def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
@@ -132,20 +138,34 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     ultimo_conocido = obtener_ultimo_enlace(nombre_feed)
-    enlace_para_guardar = None
-    parar_extraccion = False
-
     estados_cerrados = ["EV", "ADJ", "RES", "ANUL", "FOR", "AS", "RE", "CAN"]
 
-    while url_actual and paginas_procesadas < MAX_PAGINAS and not parar_extraccion:
+    urls_por_dia = {}
+    dia_actual_str = None
+    urls_visitadas_orden = []
+
+    while url_actual and paginas_procesadas < MAX_PAGINAS:
         paginas_procesadas += 1
 
-        # Si llegamos a la página marcada como límite seguro y coincide con la guardada, detenemos
-        if paginas_procesadas == PAGINA_OBJETIVO_MARGEN and ultimo_conocido and url_actual == ultimo_conocido:
-            print(f"🛑 Encontrada la página límite segura ya conocida ({url_actual}). Deteniendo lectura histórica.")
+        if ultimo_conocido and url_actual == ultimo_conocido:
+            print(f"🛑 Encontrado el enlace límite conocido ({url_actual}). Deteniendo lectura histórica.")
             break
 
         print(f"📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
+        urls_visitadas_orden.append(url_actual)
+
+        fecha_url = extraer_fecha_de_url(url_actual)
+        if paginas_procesadas == 1:
+            dia_actual_str = fecha_url or datetime.now().strftime("%Y%m%d")
+            print(f"📅 Día principal actual detectado por URL: {dia_actual_str}")
+        else:
+            if not fecha_url:
+                fecha_url = dia_actual_str
+
+            if fecha_url not in urls_por_dia:
+                urls_por_dia[fecha_url] = []
+            urls_por_dia[fecha_url].append(url_actual)
+
         try:
             resp = sesion.get(url_actual, headers=headers, timeout=30)
             if resp.status_code != 200:
@@ -156,10 +176,6 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             entries = root.findall("atom:entry", NS) or root.findall(".//{http://www.w3.org/2005/Atom}entry")
             if not entries:
                 break
-
-            # Guardamos la URL actual cuando alcancemos la página establecida como margen seguro
-            if paginas_procesadas == PAGINA_OBJETIVO_MARGEN:
-                enlace_para_guardar = url_actual
 
             for index, entry in enumerate(entries):
                 enlace_el = entry.find("atom:link", NS)
@@ -277,18 +293,33 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             if url_actual and "contrataciondelestado.es" in url_actual:
                 url_actual = url_actual.replace("contrataciondelestado.es", "contrataciondelsectorpublico.gob.es")
 
+            dias_distintos = [d for d in urls_por_dia.keys() if d != dia_actual_str]
+            if len(dias_distintos) >= 2:
+                print(f"🛑 Registrados 2 días cerrados completos. Deteniendo paginación.")
+                break
+
             time.sleep(1)
         except Exception as e:
             print(f"❌ Error de red: {e}. Reintentando...")
             time.sleep(10)
             continue
 
-    # Si por alguna razón el bucle terminó antes de llegar a la página objetivo, guardamos la última alcanzada
-    if not enlace_para_guardar and url_actual:
-        enlace_para_guardar = url_actual
+    dias_registrados = sorted([d for d in urls_por_dia.keys() if d != dia_actual_str], reverse=True)
 
-    if enlace_para_guardar:
-        guardar_ultimo_enlace(nombre_feed, enlace_para_guardar)
+    enlace_a_guardar = None
+    if len(dias_registrados) >= 2:
+        dia_objetivo = dias_registrados[1]
+        lista_urls_dia = urls_por_dia[dia_objetivo]
+        enlace_a_guardar = lista_urls_dia[0] if lista_urls_dia else None
+    elif dias_registrados:
+        enlace_a_guardar = urls_por_dia[dias_registrados[0]][0]
+
+    if not enlace_a_guardar and urls_visitadas_orden:
+        enlace_a_guardar = urls_visitadas_orden[-1]
+
+    if enlace_a_guardar:
+        print(f"💾 Guardando nuevo enlace límite seguro para futuras ejecuciones: {enlace_a_guardar}")
+        guardar_ultimo_enlace(nombre_feed, enlace_a_guardar)
 
     for item in licitaciones_por_expediente.values():
         item.pop("_atom_updated", None)
