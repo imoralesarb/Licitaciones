@@ -24,10 +24,10 @@ FEEDS_ATOM = [
         "nombre": "Licitaciones Generales",
         "url": "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom",
     },
-   # {
-    #    "nombre": "Licitaciones Agregadas",
-     #   "url": "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_644/licitacionesAgregadas.atom",
-   # },
+    {
+        "nombre": "Licitaciones Agregadas PLACSP",
+        "url": "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_644/licitacionesAgregadas.atom",
+    },
 ]
 
 MAX_PAGINAS = 15
@@ -86,7 +86,7 @@ def limpiar_licitaciones_caducadas():
     hoy_str = date.today().strftime("%Y-%m-%d")
     try:
         supabase.table("licitaciones").delete().lt("fecha_fin", hoy_str).neq("fecha_fin", "No especificada").execute()
-        print("🧹 Licitaciones caducadas eliminadas correctamente.")
+        print("🧹 Licitaciones caducadas por fecha fin eliminadas correctamente.")
     except Exception as e:
         print(f"⚠️ Error limpiando caducadas: {e}")
 
@@ -133,6 +133,9 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     primer_enlace_esta_pagina = None
     parar_extraccion = False
 
+    # Únicamente consideramos estados de cierre definitivo para borrarlas o ignorarlas
+    estados_cerrados = ["EV", "ADJ", "RES", "ANUL", "FOR", "AS", "RE", "CAN"]
+
     while url_actual and paginas_procesadas < MAX_PAGINAS and not parar_extraccion:
         paginas_procesadas += 1
         print(f"📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
@@ -154,24 +157,15 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     enlace = enlace.replace("contrataciondelestado.es", "contrataciondelsectorpublico.gob.es")
                 enlace = enlace.strip()
 
-                # Guardamos el enlace del primer elemento de la primera página para actualizar el puntero luego
                 if paginas_procesadas == 1 and index == 0:
                     primer_enlace_esta_pagina = enlace
 
-                # Si tropezamos con el último enlace que leímos en la ejecución anterior, detenemos el bucle
                 if ultimo_conocido and enlace == ultimo_conocido:
                     print(f"🛑 Encontrado el límite de la ejecución anterior ({enlace}). Deteniendo lectura de páginas.")
                     parar_extraccion = True
                     break
 
-                txt_updated = _texto(entry, "atom:updated")
-                txt_published = _texto(entry, "atom:published")
-                txt_fecha = txt_updated or txt_published
-                if not txt_fecha:
-                    continue
-
-                fecha_str = txt_fecha.split("T")[0]
-
+                # Leer estado actual del ATOM (por defecto asumimos activo si no especifica nada)
                 codigo_estado = "PUB"
                 try:
                     estado_el = entry.find(".//cbc-place-ext:ContractFolderStatusCode", NS) or entry.find(".//cbc:ContractFolderStatusCode", NS)
@@ -180,8 +174,21 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                 except Exception:
                     pass
 
-                if codigo_estado in ["EV", "ADJ", "RES", "ANUL"]:
+                # SI EL ESTADO ES CERRADO: La eliminamos de Supabase si ya existía y pasamos de largo
+                if codigo_estado in estados_cerrados:
+                    try:
+                        supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
+                    except Exception:
+                        pass
                     continue
+
+                txt_updated = _texto(entry, "atom:updated")
+                txt_published = _texto(entry, "atom:published")
+                txt_fecha = txt_updated or txt_published
+                if not txt_fecha:
+                    continue
+
+                fecha_str = txt_fecha.split("T")[0]
 
                 end_date_el = entry.find(".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", NS)
                 fecha_fin_str = "No especificada"
@@ -225,12 +232,18 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     pass
 
                 organo = "Órgano desconocido"
-                try:
-                    organo_el = entry.find(".//cac-place-ext:LocatedContractingParty//cac:PartyName//cbc:Name", NS) or entry.find(".//cac:ContractingParty//cbc:Name", NS)
-                    if organo_el is not None and organo_el.text:
+                rutas_organo = [
+                    ".//cac-place-ext:LocatedContractingParty//cac:PartyName//cbc:Name",
+                    ".//cac:ContractingParty//cac:PartyName//cbc:Name",
+                    ".//cac:TenderingParty//cac:PartyName//cbc:Name",
+                    ".//cac:ContractingParty//cac:Party//cac:PartyName//cbc:Name",
+                    ".//cbc:PartyName//cbc:Name"
+                ]
+                for ruta in rutas_organo:
+                    organo_el = entry.find(ruta, NS)
+                    if organo_el is not None and organo_el.text and organo_el.text.strip():
                         organo = organo_el.text.strip()
-                except Exception:
-                    pass
+                        break
 
                 descripcion = _texto(entry, ".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:Name", NS) or _texto(entry, ".//cac:ProcurementProject/cbc:Description", NS) or ""
                 texto_evaluacion = f"passage: Título: {titulo}. Objeto: {descripcion}. Órgano: {organo}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
@@ -245,6 +258,7 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     "lugar_ejecucion": lugar_ejecucion,
                     "fecha_fin": fecha_fin_str,
                     "texto_completo": texto_evaluacion,
+                    "fuente": nombre_feed,
                     "_atom_updated": txt_updated or txt_fecha,
                 }
 
@@ -265,7 +279,6 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             time.sleep(10)
             continue
 
-    # Actualizamos el puntero con la licitación más reciente de este feed para la próxima ejecución
     if primer_enlace_esta_pagina:
         guardar_ultimo_enlace(nombre_feed, primer_enlace_esta_pagina)
 
@@ -314,7 +327,7 @@ if todas_licitaciones:
         try:
             supabase.table("licitaciones").upsert(lic, on_conflict="enlace").execute()
             if (i + 1) % 50 == 0:
-                print(f"   -> Subidas {i + 1} de {len(todas_licitaciones)}...")
+                print(f"    -> Subidas {i + 1} de {len(todas_licitaciones)}...")
         except Exception as e:
             print(f"❌ Error subiendo a Supabase: {e}")
     print("✅ ¡Carga, control de paginación y reseteo completados con éxito!")
