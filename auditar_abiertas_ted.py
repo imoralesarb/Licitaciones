@@ -75,20 +75,25 @@ def auditar_licitaciones_abiertas_ted():
     total_actualizadas = 0
     total_sin_cambios = 0
     lote_contador = 1
+    ids_procesados = []  # Control para evitar repetir registros en bucle
 
     print("🔍 Iniciando auditoría por lotes de licitaciones TED (Fecha 'No especificada')...\n")
 
     while True:
         try:
-            # Paginación por lotes pequeños de 10 en 10
-            response = (
+            query = (
                 supabase.table("licitaciones")
                 .select("*")
                 .eq("fuente", "TED")
                 .eq("fecha_fin", "No especificada")
                 .limit(TAMANO_LOTE)
-                .execute()
             )
+            
+            # Excluimos los IDs ya procesados en esta ejecución
+            if ids_procesados:
+                query = query.not_.in_("id", ids_procesados)
+
+            response = query.execute()
             registros = response.data
         except Exception as e:
             print(f"❌ Error al consultar Supabase: {e}")
@@ -103,6 +108,8 @@ def auditar_licitaciones_abiertas_ted():
 
         for reg in registros:
             rec_id = reg.get("id")
+            ids_procesados.append(rec_id)  # Registramos el ID para no volver a pedirlo
+            
             enlace = reg.get("enlace", "")
             titulo = reg.get("titulo", "Sin título")
 
