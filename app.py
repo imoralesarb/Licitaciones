@@ -465,54 +465,127 @@ def estilizar_filas(row):
 
 
 # 5. Lógica Separada del Botón de Novedades
+# 5. Lógica del Botón de Novedades (con aplicación de todos los filtros del buscador)
 if btn_novedades:
-    with st.spinner("Cargando novedades y actualizaciones..."):
+    with st.spinner("Cargando novedades y actualizaciones filtradas..."):
         data = obtener_novedades_supabase()
         if not data:
             st.info("No hay datos en Supabase.")
         else:
             df = pd.DataFrame(data)
+            # Primero filtramos para quedarnos solo con novedades o actualizadas
             df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
 
             if df.empty:
                 st.info("No hay nuevas licitaciones ni actualizaciones en este ciclo.")
             else:
-                st.success(
-                    f"¡Se han encontrado {len(df)} licitaciones nuevas o actualizadas!"
-                )
-                st.markdown(
-                    "🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas"
-                )
+                # --- APLICAR LOS MISMOS FILTROS DE PANDAS DEL BUSCADOR ---
+                if filtro_fuente != "🌐 Todas las fuentes":
+                    df = df[df["fuente"] == filtro_fuente]
 
-                tabla_final = []
-                for idx, row in enumerate(df.itertuples(), start=1):
-                    tabla_final.append({
-                        "#": idx,
-                        "Título": row.titulo,
-                        "Órgano": row.organo,
-                        "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
-                        "Cierre": getattr(row, "fecha_fin", "No especificada"),
-                        "Fecha Pub.": row.fecha,
-                        "Importe": f"{row.importe:,.2f} €",
-                        "Enlace": row.enlace,
-                        "Es Novedad": getattr(row, "es_novedad", False),
-                        "Es Actualizada": getattr(row, "es_actualizada", False),
-                    })
+                if importe_min > 0:
+                    df = df[df["importe"] >= importe_min]
+                if importe_max > 0:
+                    df = df[df["importe"] <= importe_max]
 
-                df_final = pd.DataFrame(tabla_final)
+                if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
+                    palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
+                    if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
+                        patrones = []
+                        for p in palabras_clave:
+                            if p == "Palma":
+                                patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
+                            else:
+                                patrones.append(r"\b" + p + r"\b")
+                        patron_regex = "|".join(patrones)
+                    else:
+                        patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
+                    df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False, regex=True)]
 
-                st.dataframe(
-                    df_final.style.apply(estilizar_filas, axis=1),
-                    column_config={
-                        "Enlace": st.column_config.LinkColumn(
-                            "Enlace oficial", display_text="Ver licitación 🔗"
-                        ),
-                        "Es Novedad": None,
-                        "Es Actualizada": None,
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                )
+                if filtro_lugar_libre.strip():
+                    df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
+
+                if filtro_cpv_sector != "🌐 Todos los sectores CPV":
+                    prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
+                    def coincide_cpv(cpv_str):
+                        if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                            return False
+                        lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+                        return any(c.startswith(prefijos_validos) for c in lista_cpv)
+                    if "cpv" in df.columns:
+                        df = df[df["cpv"].apply(coincide_cpv)]
+
+                if filtro_cpv_codigo.strip():
+                    codigo_busqueda = filtro_cpv_codigo.strip()
+                    def coincide_codigo_cpv(cpv_str):
+                        if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                            return False
+                        lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+                        return any(codigo_busqueda in c for c in lista_cpv)
+                    if "cpv" in df.columns:
+                        df = df[df["cpv"].apply(coincide_codigo_cpv)]
+
+                if usar_filtro_cierre:
+                    def filtrar_fecha_fin(f_str):
+                        if not f_str:
+                            return False
+                        try:
+                            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+                        except ValueError:
+                            return False
+                    if "fecha_fin" in df.columns:
+                        df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
+
+                if usar_filtro_fechas:
+                    def filtrar_fecha_pub(f_str):
+                        if not f_str:
+                            return False
+                        try:
+                            return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
+                        except ValueError:
+                            return False
+                    if "fecha" in df.columns:
+                        df = df[df["fecha"].apply(filtrar_fecha_pub)]
+
+                if not mostrar_todos and not df.empty:
+                    df = df.head(limite_resultados)
+                # ---------------------------------------------------------
+
+                if df.empty:
+                    st.warning("No hay novedades ni actualizaciones que coincidan con los filtros indicados.")
+                else:
+                    st.success(f"¡Se han encontrado {len(df)} licitaciones nuevas o actualizadas con tus filtros!")
+                    st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
+
+                    tabla_final = []
+                    for idx, row in enumerate(df.itertuples(), start=1):
+                        tabla_final.append({
+                            "#": idx,
+                            "Título": row.titulo,
+                            "Órgano": row.organo,
+                            "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
+                            "Cierre": getattr(row, "fecha_fin", "No especificada"),
+                            "Fecha Pub.": row.fecha,
+                            "Importe": f"{row.importe:,.2f} €",
+                            "Enlace": row.enlace,
+                            "Es Novedad": getattr(row, "es_novedad", False),
+                            "Es Actualizada": getattr(row, "es_actualizada", False),
+                        })
+
+                    df_final = pd.DataFrame(tabla_final)
+
+                    st.dataframe(
+                        df_final.style.apply(estilizar_filas, axis=1),
+                        column_config={
+                            "Enlace": st.column_config.LinkColumn(
+                                "Enlace oficial", display_text="Ver licitación 🔗"
+                            ),
+                            "Es Novedad": None,
+                            "Es Actualizada": None,
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                    )
 
 # 6. Lógica de Búsqueda Principal vía Supabase RPC (Independiente de Novedades)
 elif btn_buscar:
