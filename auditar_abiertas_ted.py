@@ -41,6 +41,8 @@ MAPEO_NUTS_TED = {
     "ES4": "Centro (España)", "ES5": "Este (España)", "ES6": "Sur (España)", "ES7": "Canarias (España)"
 }
 
+TAMANO_LOTE = 10  # Lotes de 10 en 10 para agilizar y evitar bloqueos
+
 def mapear_lugar(lugar_str):
     if not lugar_str or lugar_str == "No especificado":
         return lugar_str
@@ -60,20 +62,6 @@ def procesar_campo(campo, es_lista=False):
 
 def auditar_licitaciones_abiertas_ted():
     hoy = date.today()
-    
-    print("🔍 Buscando en Supabase licitaciones TED con fecha de cierre 'No especificada'...")
-    try:
-        response = supabase.table("licitaciones").select("*").eq("fuente", "TED").eq("fecha_fin", "No especificada").execute()
-        registros = response.data
-    except Exception as e:
-        print(f"❌ Error al consultar Supabase: {e}")
-        return
-
-    if not registros:
-        print("ℹ️ No hay licitaciones TED con fecha no especificada para auditar.")
-        return
-
-    print(f"📋 Se van a auditar {len(registros)} registros de TED...\n")
     url_api = "https://api.ted.europa.eu/v3/notices/search"
     fields_solicitados = [
         "publication-number", "contract-title", "notice-title",
@@ -81,106 +69,143 @@ def auditar_licitaciones_abiertas_ted():
         "place-of-performance", "classification-cpv", "description-proc",
         "total-value", "notice-type", "form-type"
     ]
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
-    eliminadas = 0
-    actualizadas = 0
-    sin_cambios = 0
+    total_eliminadas = 0
+    total_actualizadas = 0
+    total_sin_cambios = 0
+    lote_contador = 1
 
-    for idx, reg in enumerate(registros):
-        enlace = reg.get("enlace", "")
-        if not enlace:
-            continue
+    print("🔍 Iniciando auditoría por lotes de licitaciones TED (Fecha 'No especificada')...\n")
 
-        # Extraer el número de publicación del enlace (ej: https://ted.europa.eu/en/notice/-/detail/123456-2026)
-        parts = enlace.split("/")
-        pub_number = parts[-1] if parts else None
-        if not pub_number:
-            continue
-
-        payload = {
-            "query": f"publication-number = '{pub_number}'",
-            "fields": fields_solicitados,
-            "limit": 1
-        }
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-
+    while True:
         try:
-            resp = requests.post(url_api, json=payload, headers=headers, timeout=20)
-            if resp.status_code != 200:
-                print(f"⚠️ [{idx+1}/{len(registros)}] Error API TED HTTP {resp.status_code} para {pub_number}")
-                continue
-
-            data = resp.json()
-            notices = data.get("notices", [])
-            if not notices:
-                # Si ya no existe en TED o fue eliminada por completo
-                supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
-                print(f"🗑️ [ELIMINADA - Ya no está en TED]: {reg.get('titulo')}")
-                eliminadas += 1
-                time.sleep(0.3)
-                continue
-
-            aviso = notices[0]
-            n_type = str(aviso.get("notice-type", "")).lower()
-            f_type = str(aviso.get("form-type", "")).lower()
-
-            # Comprobar si se ha adjudicado o cerrado
-            es_adjudicado = n_type.startswith("can-") or "award" in n_type or f_type == "result"
-            es_veat = n_type.startswith("dir-awa-pre") or "dir-awa-pre" in n_type or "veat" in n_type
-
-            if es_adjudicado or es_veat:
-                supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
-                print(f"🗑️ [ELIMINADA - Adjudicada/Cerrada en TED]: {reg.get('titulo')}")
-                eliminadas += 1
-                time.sleep(0.3)
-                continue
-
-            # Comprobar si ya se ha fijado una fecha de fin
-            fechas_cierre = procesar_campo(aviso.get("deadline-receipt-request"), es_lista=True)
-            nueva_fecha_fin = "No especificada"
-            if fechas_cierre != "No especificado":
-                limite_str = fechas_cierre[0] if isinstance(fechas_cierre, list) else str(fechas_cierre)
-                nueva_fecha_fin = limite_str[:10]
-
-            # Verificar si ha caducado
-            if nueva_fecha_fin != "No especificada":
-                try:
-                    f_fin_date = datetime.strptime(nueva_fecha_fin, "%Y-%m-%d").date()
-                    if f_fin_date < hoy:
-                        supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
-                        print(f"🗑️ [ELIMINADA - Caducada hoy]: {reg.get('titulo')}")
-                        eliminadas += 1
-                        time.sleep(0.3)
-                        continue
-                except ValueError:
-                    pass
-
-            # Si la fecha fin cambió de 'No especificada' a una fecha válida, la actualizamos
-            if nueva_fecha_fin != reg.get("fecha_fin"):
-                reg["fecha_fin"] = nueva_fecha_fin
-                reg["es_actualizada"] = True
-                
-                # Reconstruir texto y embedding por consistencia
-                texto_completo = reg.get("texto_completo", "")
-                reg["embedding"] = encoder.encode(texto_completo).tolist()
-
-                supabase.table("licitaciones").upsert(reg, on_conflict="enlace").execute()
-                print(f"🔄 [ACTUALIZADA Fecha Fin TED a {nueva_fecha_fin}]: {reg.get('titulo')}")
-                actualizadas += 1
-            else:
-                sin_cambios += 1
-
-            time.sleep(0.3)
-
+            # Paginación por lotes pequeños de 10 en 10
+            response = (
+                supabase.table("licitaciones")
+                .select("*")
+                .eq("fuente", "TED")
+                .eq("fecha_fin", "No especificada")
+                .limit(TAMANO_LOTE)
+                .execute()
+            )
+            registros = response.data
         except Exception as e:
-            print(f"⚠️ Error procesando TED {pub_number}: {e}")
-            continue
+            print(f"❌ Error al consultar Supabase: {e}")
+            break
 
-    print(f"\n📊 Resumen Auditoría TED:")
-    print(f"  - Eliminadas (adjudicadas/caducadas/borradas): {eliminadas}")
-    print(f"  - Actualizadas (con nueva fecha): {actualizadas}")
-    print(f"  - Sin cambios: {sin_cambios}")
-    print("✅ ¡Auditoría de licitaciones TED abiertas completada con éxito!")
+        if not registros:
+            print("\n🎉 ¡Proceso finalizado! No quedan más licitaciones TED pendientes de auditar.")
+            break
+
+        print(f"\n📦 --- Procesando Lote TED {lote_contador} ({len(registros)} registros) ---")
+        ids_a_borrar = []
+
+        for reg in registros:
+            rec_id = reg.get("id")
+            enlace = reg.get("enlace", "")
+            titulo = reg.get("titulo", "Sin título")
+
+            if not enlace:
+                continue
+
+            # Extraer el número de publicación del enlace
+            parts = enlace.split("/")
+            pub_number = parts[-1] if parts else None
+            if not pub_number:
+                continue
+
+            payload = {
+                "query": f"publication-number = '{pub_number}'",
+                "fields": fields_solicitados,
+                "limit": 1
+            }
+
+            try:
+                resp = requests.post(url_api, json=payload, headers=headers, timeout=15)
+                if resp.status_code != 200:
+                    print(f"   ⚠️ Error API TED HTTP {resp.status_code} para {pub_number}")
+                    continue
+
+                data = resp.json()
+                notices = data.get("notices", [])
+                
+                if not notices:
+                    ids_a_borrar.append(rec_id)
+                    print(f"   🗑️ [A BORRAR - Ya no está en TED]: {titulo[:50]}...")
+                    total_eliminadas += 1
+                    continue
+
+                aviso = notices[0]
+                n_type = str(aviso.get("notice-type", "")).lower()
+                f_type = str(aviso.get("form-type", "")).lower()
+
+                # Comprobar si se ha adjudicado o cerrado
+                es_adjudicado = n_type.startswith("can-") or "award" in n_type or f_type == "result"
+                es_veat = n_type.startswith("dir-awa-pre") or "dir-awa-pre" in n_type or "veat" in n_type
+
+                if es_adjudicado or es_veat:
+                    ids_a_borrar.append(rec_id)
+                    print(f"   🗑️ [A BORRAR - Adjudicada/Cerrada en TED]: {titulo[:50]}...")
+                    total_eliminadas += 1
+                    continue
+
+                # Comprobar si ya se ha fijado una fecha de fin
+                fechas_cierre = procesar_campo(aviso.get("deadline-receipt-request"), es_lista=True)
+                nueva_fecha_fin = "No especificada"
+                if fechas_cierre != "No especificado":
+                    limite_str = fechas_cierre[0] if isinstance(fechas_cierre, list) else str(fechas_cierre)
+                    nueva_fecha_fin = limite_str[:10]
+
+                # Verificar si ha caducado
+                if nueva_fecha_fin != "No especificada":
+                    try:
+                        f_fin_date = datetime.strptime(nueva_fecha_fin, "%Y-%m-%d").date()
+                        if f_fin_date < hoy:
+                            ids_a_borrar.append(rec_id)
+                            print(f"   🗑️ [A BORRAR - Caducada]: {titulo[:50]}...")
+                            total_eliminadas += 1
+                            continue
+                    except ValueError:
+                        pass
+
+                # Si la fecha fin cambió de 'No especificada' a una fecha válida, la actualizamos
+                if nueva_fecha_fin != reg.get("fecha_fin"):
+                    reg["fecha_fin"] = nueva_fecha_fin
+                    reg["es_actualizada"] = True
+                    
+                    texto_completo = reg.get("texto_completo", "")
+                    reg["embedding"] = encoder.encode(texto_completo).tolist()
+
+                    supabase.table("licitaciones").upsert(reg, on_conflict="enlace").execute()
+                    print(f"   🔄 [ACTUALIZADA Fecha Fin TED a {nueva_fecha_fin}]: {titulo[:50]}...")
+                    total_actualizadas += 1
+                else:
+                    total_sin_cambios += 1
+
+                time.sleep(0.2)
+
+            except Exception as e:
+                print(f"   ⚠️ Error procesando TED {pub_number}: {e}")
+                continue
+
+        # Borrado en bloque por lotes usando los IDs recolectados
+        if ids_a_borrar:
+            try:
+                supabase.table("licitaciones").delete().in_("id", ids_a_borrar).execute()
+                print(f"   🗑️ -> ¡{len(ids_a_borrar)} licitaciones TED eliminadas de Supabase en este lote!")
+            except Exception as e:
+                print(f"   ❌ Error al eliminar lote en Supabase: {e}")
+
+        lote_contador += 1
+        time.sleep(0.5)
+
+    print("\n" + "=" * 50)
+    print("📊 RESUMEN FINAL AUDITORÍA TED:")
+    print(f"  - Eliminadas (adjudicadas/caducadas/borradas): {total_eliminadas}")
+    print(f"  - Actualizadas (con nueva fecha): {total_actualizadas}")
+    print(f"  - Sin cambios: {total_sin_cambios}")
+    print("✅ ¡Auditoría de licitaciones TED completada con éxito y sin bloqueos!")
 
 if __name__ == "__main__":
     auditar_licitaciones_abiertas_ted()
