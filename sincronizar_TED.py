@@ -100,9 +100,9 @@ def consultar_ted_api_scroll():
         "total-value", "total-value-cur", "notice-type", "form-type"
     ]
     
-    # Rango dinámico: últimos 60 días hasta hoy
+    # Reducimos la ventana a 7 días ya que se ejecuta a diario para evitar sobrecarga
     hoy = date.today()
-    fecha_inicio = (hoy - timedelta(days=60)).strftime("%Y%m%d")
+    fecha_inicio = (hoy - timedelta(days=7)).strftime("%Y%m%d")
     fecha_fin_str = hoy.strftime("%Y%m%d")
     
     todas_licitaciones = []
@@ -187,6 +187,7 @@ def sincronizar_licitaciones_ted():
     filtrados_adjudicados = 0
     filtrados_caducados = 0
     filtrados_veat = 0
+    filtrados_duplicados_placsp = 0
 
     for aviso in lics_ted:
         num = aviso.get("publication-number")
@@ -203,7 +204,7 @@ def sincronizar_licitaciones_ted():
         n_type = str(aviso.get("notice-type", "")).lower()
         f_type = str(aviso.get("form-type", "")).lower()
         
-        # Filtrar adjudicados o resultados (se eliminan si ya existían o se omiten)
+        # Filtrar adjudicados o resultados
         es_adjudicado = n_type.startswith("can-") or "award" in n_type or f_type == "result"
         if es_adjudicado:
             filtrados_adjudicados += 1
@@ -214,7 +215,7 @@ def sincronizar_licitaciones_ted():
                     pass
             continue
 
-        # Filtrar información previa / transparentes (VEAT)
+        # Filtrar VEAT
         es_veat = n_type.startswith("dir-awa-pre") or "dir-awa-pre" in n_type or "veat" in n_type
         if es_veat:
             filtrados_veat += 1
@@ -262,13 +263,17 @@ def sincronizar_licitaciones_ted():
         es_novedad = False
         es_actualizada = False
 
-        if enlace not in mapa_enlaces and clave_duplicado not in registros_existentes:
-            es_novedad = True
-        else:
-            # Comprobar si ya existe por enlace o título/órgano para detectar actualización
-            reg_existente = mapa_enlaces.get(enlace)
-            if reg_existente and fecha_str > reg_existente.get("fecha", ""):
+        if enlace in mapa_enlaces:
+            reg_existente = mapa_enlaces[enlace]
+            if fecha_str > reg_existente.get("fecha", ""):
                 es_actualizada = True
+        else:
+            # Si el enlace no está, pero la combinación de Título y Órgano ya existe (ej. ya la subió PLACSP), la omitimos para no duplicar
+            if clave_duplicado in registros_existentes:
+                filtrados_duplicados_placsp += 1
+                continue
+            else:
+                es_novedad = True
 
         embedding = encoder.encode(texto_completo).tolist()
 
@@ -290,7 +295,7 @@ def sincronizar_licitaciones_ted():
         
         licitaciones_validas.append(elemento)
 
-    print(f"\nEstadísticas TED - Adjudicados descartados: {filtrados_adjudicados} | VEAT descartados: {filtrados_veat} | Caducados descartados: {filtrados_caducados}")
+    print(f"\nEstadísticas TED - Duplicados evitados (ya estaban en PLACSP): {filtrados_duplicados_placsp} | Adjudicados: {filtrados_adjudicados} | VEAT: {filtrados_veat} | Caducados: {filtrados_caducados}")
     print(f"Licitaciones TED listas para sincronizar: {len(licitaciones_validas)}")
 
     # Inserción / actualización en Supabase por lotes
