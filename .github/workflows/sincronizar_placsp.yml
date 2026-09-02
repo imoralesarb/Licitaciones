@@ -1,13 +1,13 @@
-name: Sincronizar Licitaciones ATOM
+name: Sincronizar Licitaciones PLACSP
 
 on:
   schedule:
-    # Se ejecutará a las 05:00 UTC (las 6:00 AM en horario de verano de Canarias)
-    - cron: '0 5 * * *'
-  workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub
+    # 2:00 AM en hora canaria (02:00 UTC)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
-  sincronizar:
+  sincronizar-placsp:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del repositorio
@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install feedparser supabase sentence-transformers lxml requests
 
-      - name: Ejecutar script de sincronización
+      - name: Ejecutar script PLACSP
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
