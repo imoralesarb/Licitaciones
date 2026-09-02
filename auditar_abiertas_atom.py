@@ -47,25 +47,29 @@ def auditar_licitaciones_abiertas():
     total_actualizadas = 0
     total_sin_cambios = 0
     lote_contador = 1
+    ids_procesados = []  # Control para evitar repetir registros en bucle
 
     print("🔍 Iniciando auditoría por lotes de licitaciones con fecha de cierre 'No especificada'...\n")
 
     while True:
         try:
-            # Traemos un lote pequeño de 10 registros pendientes de auditar
-            response = (
+            query = (
                 supabase.table("licitaciones")
                 .select("*")
                 .eq("fecha_fin", "No especificada")
                 .limit(TAMANO_LOTE)
-                .execute()
             )
+            
+            # Excluimos los IDs ya procesados en esta ejecución para que avance correctamente
+            if ids_procesados:
+                query = query.not_.in_("id", ids_procesados)
+
+            response = query.execute()
             registros = response.data
         except Exception as e:
             print(f"❌ Error al consultar Supabase: {e}")
             break
 
-        # Si ya no quedan registros con fecha no especificada, terminamos el bucle
         if not registros:
             print("\n🎉 ¡Proceso finalizado! No quedan más licitaciones pendientes de auditar en este grupo.")
             break
@@ -76,13 +80,14 @@ def auditar_licitaciones_abiertas():
 
         for reg in registros:
             rec_id = reg.get("id")
+            ids_procesados.append(rec_id)  # Registramos el ID para no volver a pedirlo
+            
             enlace = reg.get("enlace")
             titulo = reg.get("titulo", "Sin título")
 
             if not enlace:
                 continue
 
-            # Si es un enlace de TED, lo saltamos o dejamos pasar
             if "ted.europa.eu" in enlace:
                 continue
 
@@ -101,7 +106,6 @@ def auditar_licitaciones_abiertas():
                 if estado_el is not None and estado_el.text:
                     codigo_estado = estado_el.text.strip().upper()
 
-                # Si el estado es cerrado/adjudicado/anulado
                 if codigo_estado in ESTADOS_CERRADOS:
                     ids_a_borrar.append(rec_id)
                     print(f"   🗑️ [A BORRAR - Estado {codigo_estado}]: {titulo[:50]}...")
@@ -131,7 +135,6 @@ def auditar_licitaciones_abiertas():
                     reg["fecha_fin"] = nueva_fecha_fin
                     reg["es_actualizada"] = True
                     
-                    # Recalcular embedding por si acaso
                     texto_evaluacion = f"passage: Título: {reg.get('titulo')}. Objeto: {reg.get('texto_completo')}. Órgano: {reg.get('organo')}. Importe: {reg.get('importe')} EUR."
                     reg["embedding"] = encoder.encode(texto_evaluacion).tolist()
                     
@@ -147,7 +150,6 @@ def auditar_licitaciones_abiertas():
                 print(f"   ⚠️ Error procesando enlace: {e}")
                 continue
 
-        # Borrar en bloque los registros identificados como cerrados/caducados en este lote
         if ids_a_borrar:
             try:
                 supabase.table("licitaciones").delete().in_("id", ids_a_borrar).execute()
@@ -156,7 +158,7 @@ def auditar_licitaciones_abiertas():
                 print(f"   ❌ Error al eliminar lote en Supabase: {e}")
 
         lote_contador += 1
-        time.sleep(0.5)  # Pausa breve entre lotes
+        time.sleep(0.5)
 
     print("\n" + "=" * 50)
     print("📊 RESUMEN FINAL DE LA AUDITORÍA:")
