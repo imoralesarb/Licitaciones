@@ -708,8 +708,8 @@ elif btn_buscar:
                 todos_los_datos.extend(filas)
                 
                 # Si es una búsqueda rápida sin filtros complejos, cortamos en el primer lote
-                if not mostrar_todos and not usar_filtro_fechas and not usar_filtro_cierre:
-                    break
+                #if not mostrar_todos and not usar_filtro_fechas and not usar_filtro_cierre:
+                    #break
                     
                 if len(filas) < tamano_lote:
                     break
