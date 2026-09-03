@@ -100,7 +100,6 @@ def consultar_ted_api_scroll():
         "total-value", "total-value-cur", "notice-type", "form-type"
     ]
     
-    # Reducimos la ventana a 7 días ya que se ejecuta a diario para evitar sobrecarga
     hoy = date.today()
     fecha_inicio = (hoy - timedelta(days=7)).strftime("%Y%m%d")
     fecha_fin_str = hoy.strftime("%Y%m%d")
@@ -268,7 +267,6 @@ def sincronizar_licitaciones_ted():
             if fecha_str > reg_existente.get("fecha", ""):
                 es_actualizada = True
         else:
-            # Si el enlace no está, pero la combinación de Título y Órgano ya existe (ej. ya la subió PLACSP), la omitimos para no duplicar
             if clave_duplicado in registros_existentes:
                 filtrados_duplicados_placsp += 1
                 continue
@@ -298,17 +296,34 @@ def sincronizar_licitaciones_ted():
     print(f"\nEstadísticas TED - Duplicados evitados (ya estaban en PLACSP): {filtrados_duplicados_placsp} | Adjudicados: {filtrados_adjudicados} | VEAT: {filtrados_veat} | Caducados: {filtrados_caducados}")
     print(f"Licitaciones TED listas para sincronizar: {len(licitaciones_validas)}")
 
-    # Inserción / actualización en Supabase por lotes
+    # Inserción / actualización en Supabase por lotes con reintentos
     if licitaciones_validas:
         print("🚀 Subiendo licitaciones TED a Supabase...")
-        tamano_lote = 25
+        tamano_lote = 15  # Reducido de 25 a 15 para evitar timeouts por tamaño de consulta
+        max_intentos = 3
+
         for i in range(0, len(licitaciones_validas), tamano_lote):
             lote = licitaciones_validas[i:i + tamano_lote]
-            try:
-                supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
-                print(f"  -> Lote TED {i // tamano_lote + 1} procesado con éxito ({len(lote)} registros).")
-            except Exception as e:
-                print(f"❌ Error al subir lote TED {i // tamano_lote + 1}: {e}")
+            num_lote = i // tamano_lote + 1
+            exito = False
+            
+            for intento in range(1, max_intentos + 1):
+                try:
+                    supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
+                    print(f"  -> Lote TED {num_lote} procesado con éxito ({len(lote)} registros).")
+                    exito = True
+                    break
+                except Exception as e:
+                    print(f"⚠️ Intento {intento}/{max_intentos} fallido para lote TED {num_lote}: {e}")
+                    if intento < max_intentos:
+                        time.sleep(2 * intento) # Espera progresiva antes de reintentar (2s, 4s...)
+                    else:
+                        print(f"❌ Error definitivo al subir lote TED {num_lote} tras {max_intentos} intentos.")
+            
+            if not exito:
+                # Opcional: puedes decidir si quieres que pare por completo o continúe con el siguiente lote
+                pass
+
         print("✅ ¡Sincronización de TED completada con éxito!")
     else:
         print("ℹ️ No hay licitaciones TED nuevas que sincronizar.")
