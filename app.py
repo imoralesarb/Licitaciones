@@ -602,14 +602,25 @@ if btn_novedades:
                 if "fecha" in df.columns:
                     df = df[df["fecha"].apply(filtrar_fecha_pub)]
 
-            if not df.empty and not mostrar_todos:
-                df = df.head(limite_resultados)
-            # --------------------------------------------------------------------------
-
             if df.empty:
                 st.warning("No hay novedades ni actualizaciones que coincidan con los filtros y la búsqueda indicada.")
             else:
-                st.success(f"¡Se han encontrado {len(df)} licitaciones nuevas o actualizadas con tus filtros!")
+                if not mostrar_todos:
+                    total_encontrados = len(df)
+                    df = df.head(limite_resultados)
+                    mostrados = len(df)
+
+                    if total_encontrados > mostrados:
+                        st.success(
+                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas! "
+                            f"(Ajusta la barra de resultados o activa 'Mostrar TODOS los resultados' para ver el resto)."
+                        )
+                    else:
+                        st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
+                else:
+                    mostrados = len(df)
+                    st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
+
                 st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
 
                 tabla_final = []
@@ -803,16 +814,26 @@ elif btn_buscar:
                 if "fecha" in df.columns:
                     df = df[df["fecha"].apply(filtrar_fecha_pub)]
 
-            if not df.empty and not mostrar_todos:
-                df = df.head(limite_resultados)
-
             if df.empty:
-                st.warning("No se encontraron resultados con los filtros indicados.")
+                st.warning("No hay novedades ni actualizaciones que coincidan con los filtros y la búsqueda indicada.")
             else:
-                st.success(f"¡Se han encontrado {len(df)} licitaciones relevantes!")
-                st.markdown(
-                    "🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas"
-                )
+                if not mostrar_todos:
+                    total_encontrados = len(df)
+                    df = df.head(limite_resultados)
+                    mostrados = len(df)
+
+                    if total_encontrados > mostrados:
+                        st.success(
+                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas! "
+                            f"(Ajusta la barra de resultados o activa 'Mostrar TODOS los resultados' para ver el resto)."
+                        )
+                    else:
+                        st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
+                else:
+                    mostrados = len(df)
+                    st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
+
+                st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
 
                 tabla_final = []
                 for idx, row in enumerate(df.itertuples(), start=1):
