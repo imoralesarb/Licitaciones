@@ -27,7 +27,7 @@ FEEDS_ATOM = [
     },
     {
         "nombre": "Licitaciones Agregadas PLACSP",
-        "url": "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_644/licitacionesAgregadas.atom",
+        "url": "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_1044/PlataformasAgregadasSinMenores.atom",
     },
 ]
 
