@@ -666,7 +666,8 @@ elif btn_buscar:
             vector_query = encoder.encode(query_con_prefijo).tolist()
 
             # Si el usuario quiere ver todo o usa filtros complejos, pedimos un match_count masivo
-            match_count_deseado = 999999 if (mostrar_todos or usar_filtro_fechas or usar_filtro_cierre) else max(limite_resultados * 3, 50)
+            # match_count_deseado = 999999 if (mostrar_todos or usar_filtro_fechas or usar_filtro_cierre) else max(limite_resultados * 3, 50)
+            match_count_deseado = 999999
 
             try:
                 response = supabase.rpc(
