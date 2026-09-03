@@ -816,7 +816,7 @@ elif btn_buscar:
                     df = df[df["fecha"].apply(filtrar_fecha_pub)]
 
             if df.empty:
-                st.warning("No hay novedades ni actualizaciones que coincidan con los filtros y la búsqueda indicada.")
+                st.warning("No hay licitaciones que coincidan con los filtros y la búsqueda indicada.")
             else:
                 if not mostrar_todos:
                     total_encontrados = len(df)
