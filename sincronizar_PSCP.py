@@ -1,4 +1,4 @@
-# Importación de librerías
+# -*- coding: utf-8 -*-
 from datetime import datetime, date, timedelta
 import os
 import time
@@ -7,19 +7,18 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client
 
-
-# Configuración de la Base de Datos
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Carga del modelo de embbedings
-
 print("Cargando modelo de IA (multilingual-e5-small)...")
 encoder = SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
 
-# Función para añadir Cataluña como lugar de ejecución para facilitar el filtrado
+
 def procesar_lugar(lugar_raw):
     lugar_limpio = str(lugar_raw).strip() if lugar_raw else "No especificado"
     if lugar_limpio == "No especificado" or not lugar_limpio:
@@ -29,19 +28,16 @@ def procesar_lugar(lugar_raw):
     return lugar_limpio
 
 
-# Función para sincronizar
 def sincronizar_licitaciones_pscp():
     hoy_date = datetime.now().date()
     ayer_date = hoy_date - timedelta(days=1)
     
-    # Rango dinámico: desde ayer hasta mañana (dos días)
     fecha_inicio = ayer_date.strftime("%Y-%m-%dT00:00:00")
     fecha_fin = (hoy_date + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00")
 
     dataset_id = "ybgg-dgi6"
     client = Socrata("analisi.transparenciacatalunya.cat", None)
 
-    # filtrado por rango de fechas y 'anuncio de licitación'
     query = f"data_publicacio_anunci >= '{fecha_inicio}' AND data_publicacio_anunci < '{fecha_fin}' AND fase_publicacio = 'Anunci de licitació'"
 
     print("Consultando la API de la PSCP...")
@@ -49,7 +45,6 @@ def sincronizar_licitaciones_pscp():
     offset = 0
     results = []
 
-    # bucle de paginación
     while True:
         try:
             chunk = client.get(
@@ -71,16 +66,23 @@ def sincronizar_licitaciones_pscp():
 
     print(f"Total registros obtenidos de la API PSCP: {len(results)}")
 
-    # 1. Marcar todas las anteriores de la bbdd cuya fuente es pscp cataluña como no novedad y no actualizadas
+    # 1. Solución al Timeout: Resetear flags por lotes de IDs en lugar de una consulta global masiva
+    print("Reseteando flags de novedades anteriores...")
     try:
-        supabase.table("licitaciones").update({
-            "es_novedad": False,
-            "es_actualizada": False
-        }).eq("es_novedad", True).eq("fuente", "PSCP Catalunya").execute()
+        res_antiguos = supabase.table("licitaciones").select("id").eq("fuente", "PSCP Catalunya").eq("es_novedad", True).execute()
+        ids_antiguos = [item["id"] for item in res_antiguos.data]
+        
+        if ids_antiguos:
+            for i in range(0, len(ids_antiguos), 100):
+                lote_ids = ids_antiguos[i:i+100]
+                supabase.table("licitaciones").update({
+                    "es_novedad": False,
+                    "es_actualizada": False
+                }).in_("id", lote_ids).execute()
         print("Flags reseteados con éxito.")
     except Exception as e:
-        print(f"Error al resetear flags: {e}")
- 
+        print(f"Aviso al resetear flags: {e}")
+
     # 2. Cargar registros existentes en Supabase para validar duplicados y actualizaciones
     try:
         existentes_resp = supabase.table("licitaciones").select("*").eq("fuente", "PSCP Catalunya").execute()
@@ -134,7 +136,6 @@ def sincronizar_licitaciones_pscp():
 
         texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo_str}. CPV: {cpv}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
         
-        # Comprobar si ya existe para ver si cambió algo (actualización) o es nuevo
         es_nuevo = enlace not in registros_db
         es_actualizado = False
 
@@ -165,7 +166,7 @@ def sincronizar_licitaciones_pscp():
 
         licitaciones_validas.append(elemento)
 
-    # 3. Limpieza automática: Borrar de Supabase las que ya estén cerradas o cuya fecha fin ya pasó
+    # 3. Limpieza automática de caducadas
     try:
         todos_db = supabase.table("licitaciones").select("id, enlace, fecha_fin").eq("fuente", "PSCP Catalunya").execute()
         ids_a_borrar = []
@@ -187,17 +188,24 @@ def sincronizar_licitaciones_pscp():
     except Exception as e:
         print(f"Error en la limpieza de caducadas: {e}")
 
-    # 4. Inserción o actualización en lotes
+    # 4. Inserción con contador exacto de subidas
     if licitaciones_validas:
-        print("Subiendo licitaciones a Supabase...")
+        total_a_subir = len(licitaciones_validas)
+        print(f"Subiendo un total de {total_a_subir} licitaciones a Supabase...")
+        
         tamano_lote = 15
-        for i in range(0, len(licitaciones_validas), tamano_lote):
+        subidas_exitosas = 0
+        
+        for i in range(0, total_a_subir, tamano_lote):
             lote = licitaciones_validas[i:i + tamano_lote]
             try:
                 supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
+                subidas_exitosas += len(lote)
+                print(f"Progreso: {subidas_exitosas}/{total_a_subir} licitaciones procesadas...")
             except Exception as e:
-                print(f"Error al subir lote: {e}")
-        print("Sincronización completada con éxito.")
+                print(f"Error al subir lote (índices {i} a {i+len(lote)}): {e}")
+                
+        print(f"Sincronización completada con éxito. Se han subido/actualizado {subidas_exitosas} de {total_a_subir} licitaciones.")
     else:
         print("No hay licitaciones para procesar en este rango.")
 
