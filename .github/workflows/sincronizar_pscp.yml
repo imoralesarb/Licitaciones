@@ -28,6 +28,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: |
-          cd "PSCP Catalunya"
+        run: 
           python sincronizar_PSCP.py
