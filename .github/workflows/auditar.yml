@@ -1,9 +1,9 @@
-name: Auditar Licitaciones Abiertas (PLACSP y TED)
+name: Auditar Licitaciones Abiertas (PLACSP, TED y PSCP)
 
 on:
   schedule:
-    - cron: '30 0 * * *'  # Todos los días a las 00:30 UTC
-  workflow_dispatch:      # Permite ejecución manual
+    - cron: '30 0 */14 * *'  # Cada 14 días a las 00:30 UTC
+  workflow_dispatch:        # Permite ejecución manual
 
 jobs:
   auditar_todas:
@@ -21,7 +21,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install requests lxml sentence-transformers supabase
+          pip install requests lxml sentence-transformers supabase sodapy
 
       - name: Ejecutar auditoría PLACSP
         env:
@@ -36,3 +36,10 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python auditar_abiertas_ted.py
+
+      - name: Ejecutar auditoría PSCP Catalunya
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python auditar_abiertas_pscp.py
