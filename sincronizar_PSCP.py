@@ -76,10 +76,11 @@ def sincronizar_licitaciones_pscp():
         supabase.table("licitaciones").update({
             "es_novedad": False,
             "es_actualizada": False
-        }).eq("fuente", "PSCP Catalunya").execute()
+        }).eq("es_novedad", True).eq("fuente", "PSCP Catalunya").execute()
+        print("Flags reseteados con éxito.")
     except Exception as e:
-        print(f"Error al resetear flags en Supabase: {e}")
-
+        print(f"Error al resetear flags: {e}")
+ 
     # 2. Cargar registros existentes en Supabase para validar duplicados y actualizaciones
     try:
         existentes_resp = supabase.table("licitaciones").select("*").eq("fuente", "PSCP Catalunya").execute()
