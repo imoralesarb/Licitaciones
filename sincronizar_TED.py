@@ -155,6 +155,12 @@ def consultar_ted_api_scroll():
 
 def sincronizar_licitaciones_ted():
     hoy = datetime.now().date()
+    # 0. Resetear es_novedad y es_actualizada a False para todos los registros de TED
+    try:
+        supabase.table("licitaciones").update({"es_novedad": False, "es_actualizada": False}).eq("fuente", "TED").execute()
+        print("🔄 Flags 'es_novedad' y 'es_actualizada' reseteados a False para los registros TED existentes.")
+    except Exception as e:
+        print(f"⚠️ Aviso al resetear flags de TED: {e}")
     
     # 1. Limpieza de registros TED caducados en Supabase
     try:
