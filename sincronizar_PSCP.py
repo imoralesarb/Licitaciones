@@ -66,15 +66,17 @@ def sincronizar_licitaciones_pscp():
 
     print(f"Total registros obtenidos de la API PSCP: {len(results)}")
 
-    # 1. Solución al Timeout: Resetear flags por lotes de IDs en lugar de una consulta global masiva
+    # 1. Solución al Timeout: Resetear flags mediante paginación por lotes pequeños
     print("Reseteando flags de novedades anteriores...")
     try:
-        res_antiguos = supabase.table("licitaciones").select("id").eq("fuente", "PSCP Catalunya").eq("es_novedad", True).execute()
-        ids_antiguos = [item["id"] for item in res_antiguos.data]
-        
-        if ids_antiguos:
-            for i in range(0, len(ids_antiguos), 100):
-                lote_ids = ids_antiguos[i:i+100]
+        while True:
+            res_antiguos = supabase.table("licitaciones").select("id").eq("fuente", "PSCP Catalunya").eq("es_novedad", True).limit(200).execute()
+            if not res_antiguos.data:
+                break
+            ids_antiguos = [item["id"] for item in res_antiguos.data]
+            
+            for i in range(0, len(ids_antiguos), 50):
+                lote_ids = ids_antiguos[i:i+50]
                 supabase.table("licitaciones").update({
                     "es_novedad": False,
                     "es_actualizada": False
@@ -166,7 +168,7 @@ def sincronizar_licitaciones_pscp():
 
         licitaciones_validas.append(elemento)
 
-    # 3. Limpieza automática de caducadas
+    # 3. Limpieza automática de caducadas por lotes
     try:
         todos_db = supabase.table("licitaciones").select("id, enlace, fecha_fin").eq("fuente", "PSCP Catalunya").execute()
         ids_a_borrar = []
@@ -188,22 +190,36 @@ def sincronizar_licitaciones_pscp():
     except Exception as e:
         print(f"Error en la limpieza de caducadas: {e}")
 
-    # 4. Inserción con contador exacto de subidas
+    # 4. Inserción optimizada con lotes ultra pequeños (5 registros) y reintentos para evitar Timeouts
     if licitaciones_validas:
         total_a_subir = len(licitaciones_validas)
         print(f"Subiendo un total de {total_a_subir} licitaciones a Supabase...")
         
-        tamano_lote = 15
+        tamano_lote = 5
         subidas_exitosas = 0
+        max_intentos = 3
         
         for i in range(0, total_a_subir, tamano_lote):
             lote = licitaciones_validas[i:i + tamano_lote]
-            try:
-                supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
-                subidas_exitosas += len(lote)
-                print(f"Progreso: {subidas_exitosas}/{total_a_subir} licitaciones procesadas...")
-            except Exception as e:
-                print(f"Error al subir lote (índices {i} a {i+len(lote)}): {e}")
+            num_lote = i // tamano_lote + 1
+            exito = False
+            
+            for intento in range(1, max_intentos + 1):
+                try:
+                    supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
+                    subidas_exitosas += len(lote)
+                    print(f"Progreso: {subidas_exitosas}/{total_a_subir} licitaciones procesadas...")
+                    exito = True
+                    break
+                except Exception as e:
+                    print(f"⚠️ Intento {intento}/{max_intentos} fallido para lote PSCP {num_lote}: {e}")
+                    if intento < max_intentos:
+                        time.sleep(2 * intento)
+                    else:
+                        print(f"❌ Error definitivo al subir lote PSCP {num_lote}.")
+            
+            if not exito:
+                pass
                 
         print(f"Sincronización completada con éxito. Se han subido/actualizado {subidas_exitosas} de {total_a_subir} licitaciones.")
     else:
