@@ -43,3 +43,10 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python auditar_abiertas_pscp.py
+
+      - name: Ejecutar auditoría Euskadi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python auditar_abiertas_euskadi.py
