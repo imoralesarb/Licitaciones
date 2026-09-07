@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import date, datetime
 import os
 import re
@@ -83,13 +84,6 @@ def _texto(el, xpath, ns=NS):
     nodo = el.find(xpath, ns)
     return nodo.text.strip() if nodo is not None and nodo.text else None
 
-def extraer_fecha_de_url(url):
-    """Extrae la fecha en formato YYYYMMDD del nombre de archivo del enlace Atom si existe."""
-    match = re.search(r'_(\d{8})_\d{6}', url)
-    if match:
-        return match.group(1)
-    return None
-
 def limpiar_licitaciones_caducadas():
     hoy_str = date.today().strftime("%Y-%m-%d")
     try:
@@ -98,32 +92,27 @@ def limpiar_licitaciones_caducadas():
     except Exception as e:
         print(f"⚠️ Error limpiando caducadas: {e}")
 
-def resetear_etiquetas_diarias():
-    print("🔄 Reseteando estados de novedad y actualización de ejecuciones anteriores...")
+def resetear_etiquetas_por_fuente(nombre_feed):
+    print(f"🔄 Reseteando estados para la fuente: {nombre_feed}...")
     try:
-        supabase.table("licitaciones").update({"es_novedad": False, "es_actualizada": False}).eq("es_novedad", True).execute()
-        supabase.table("licitaciones").update({"es_novedad": False, "es_actualizada": False}).eq("es_actualizada", True).execute()
-        print("🧹 Estados reseteados con éxito.")
+        while True:
+            res = supabase.table("licitaciones").select("id").eq("fuente", nombre_feed).eq("es_novedad", True).limit(200).execute()
+            if not res.data:
+                break
+            ids = [item["id"] for item in res.data]
+            for i in range(0, len(ids), 50):
+                supabase.table("licitaciones").update({"es_novedad": False, "es_actualizada": False}).in_("id", ids[i:i+50]).execute()
+        
+        while True:
+            res = supabase.table("licitaciones").select("id").eq("fuente", nombre_feed).eq("es_actualizada", True).limit(200).execute()
+            if not res.data:
+                break
+            ids = [item["id"] for item in res.data]
+            for i in range(0, len(ids), 50):
+                supabase.table("licitaciones").update({"es_novedad": False, "es_actualizada": False}).in_("id", ids[i:i+50]).execute()
+        print(f"🧹 Estados reseteados con éxito para {nombre_feed}.")
     except Exception as e:
-        print(f"⚠️ Aviso al resetear estados anteriores: {e}")
-
-def obtener_ultimo_enlace(nombre_feed):
-    try:
-        resp = supabase.table("estado_sincronizacion").select("ultimo_enlace_procesado").eq("feed_nombre", nombre_feed).execute()
-        if resp.data and len(resp.data) > 0:
-            return resp.data[0]["ultimo_enlace_procesado"]
-    except Exception:
-        pass
-    return None
-
-def guardar_ultimo_enlace(nombre_feed, enlace):
-    try:
-        supabase.table("estado_sincronizacion").upsert({
-            "feed_nombre": nombre_feed,
-            "ultimo_enlace_procesado": enlace
-        }, on_conflict="feed_nombre").execute()
-    except Exception as e:
-        print(f"⚠️ No se pudo guardar el puntero de sincronización: {e}")
+        print(f"⚠️ Aviso al resetear estados para {nombre_feed}: {e}")
 
 # ============================================================
 # 3. PROCESAMIENTO DEL FEED CON DETECCIÓN POR NOMBRE DE URL
@@ -291,11 +280,13 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
 # ============================================================
 
 limpiar_licitaciones_caducadas()
-resetear_etiquetas_diarias()
 
 todas_licitaciones = []
 for feed in FEEDS_ATOM:
     print(f"🌐 PROCESANDO FEED: {feed['nombre']}")
+    # Resetear solo las etiquetas de este feed específico mediante paginación segura
+    resetear_etiquetas_por_fuente(feed["nombre"])
+    
     lics = procesar_feed_atom_en_linea(feed["nombre"], feed["url"])
     todas_licitaciones.extend(lics)
 
@@ -321,14 +312,34 @@ for lic in todas_licitaciones:
 
 if todas_licitaciones:
     print("🚀 Generando embeddings y subiendo a Supabase...")
-    for i, lic in enumerate(todas_licitaciones):
+    for lic in todas_licitaciones:
         lic["embedding"] = encoder.encode(lic["texto_completo"]).tolist()
-        try:
-            supabase.table("licitaciones").upsert(lic, on_conflict="enlace").execute()
-            if (i + 1) % 50 == 0:
-                print(f"    -> Subidas {i + 1} de {len(todas_licitaciones)}...")
-        except Exception as e:
-            print(f"❌ Error subiendo a Supabase: {e}")
+
+    tamano_lote = 5
+    subidas_exitosas = 0
+    total_a_subir = len(todas_licitaciones)
+    max_intentos = 3
+
+    for i in range(0, total_a_subir, tamano_lote):
+        lote = todas_licitaciones[i:i + tamano_lote]
+        num_lote = i // tamano_lote + 1
+        exito = False
+
+        for intento in range(1, max_intentos + 1):
+            try:
+                supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
+                subidas_exitosas += len(lote)
+                print(f"  -> Lote PLACSP {num_lote} procesado ({subidas_exitosas}/{total_a_subir})...")
+                exito = True
+                break
+            except Exception as e:
+                print(f"⚠️ Intento {intento}/{max_intentos} fallido para lote PLACSP {num_lote}: {e}")
+                if intento < max_intentos:
+                    time.sleep(2 * intento)
+
+        if not exito:
+            pass
+
     print("✅ ¡Carga, control de paginación y reseteo completados con éxito!")
 else:
     print("ℹ️ No hay licitaciones nuevas que procesar en esta ejecución.")
