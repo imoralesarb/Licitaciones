@@ -50,3 +50,9 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python auditar_abiertas_euskadi.py
+      - name: Ejecutar auditoría Madrid
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python auditar_abiertas_madrid.py
