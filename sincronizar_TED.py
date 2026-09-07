@@ -155,10 +155,21 @@ def consultar_ted_api_scroll():
 
 def sincronizar_licitaciones_ted():
     hoy = datetime.now().date()
-    # 0. Resetear es_novedad y es_actualizada a False para todos los registros de TED
+    
+    # 0. Resetear flags de forma segura seleccionando únicamente los IDs por lotes para evitar timeouts
+    print("Reseteando flags de novedades anteriores para TED...")
     try:
-        supabase.table("licitaciones").update({"es_novedad": False, "es_actualizada": False}).eq("fuente", "TED").execute()
-        print("🔄 Flags 'es_novedad' y 'es_actualizada' reseteados a False para los registros TED existentes.")
+        res_antiguos = supabase.table("licitaciones").select("id").eq("fuente", "TED").or_("es_novedad.eq.true,es_actualizada.eq.true").execute()
+        ids_antiguos = [item["id"] for item in res_antiguos.data]
+        
+        if ids_antiguos:
+            for i in range(0, len(ids_antiguos), 50):
+                lote_ids = ids_antiguos[i:i+50]
+                supabase.table("licitaciones").update({
+                    "es_novedad": False,
+                    "es_actualizada": False
+                }).in_("id", lote_ids).execute()
+        print("🔄 Flags reseteados con éxito por lotes.")
     except Exception as e:
         print(f"⚠️ Aviso al resetear flags de TED: {e}")
     
@@ -302,10 +313,10 @@ def sincronizar_licitaciones_ted():
     print(f"\nEstadísticas TED - Duplicados evitados (ya estaban en PLACSP): {filtrados_duplicados_placsp} | Adjudicados: {filtrados_adjudicados} | VEAT: {filtrados_veat} | Caducados: {filtrados_caducados}")
     print(f"Licitaciones TED listas para sincronizar: {len(licitaciones_validas)}")
 
-    # Inserción / actualización en Supabase por lotes con reintentos
+    # Inserción / actualización en Supabase por lotes ultra pequeños (5 registros) para evitar timeouts con embeddings
     if licitaciones_validas:
         print("🚀 Subiendo licitaciones TED a Supabase...")
-        tamano_lote = 15  # Reducido de 25 a 15 para evitar timeouts por tamaño de consulta
+        tamano_lote = 5  
         max_intentos = 3
 
         for i in range(0, len(licitaciones_validas), tamano_lote):
@@ -322,12 +333,11 @@ def sincronizar_licitaciones_ted():
                 except Exception as e:
                     print(f"⚠️ Intento {intento}/{max_intentos} fallido para lote TED {num_lote}: {e}")
                     if intento < max_intentos:
-                        time.sleep(2 * intento) # Espera progresiva antes de reintentar (2s, 4s...)
+                        time.sleep(2 * intento) 
                     else:
                         print(f"❌ Error definitivo al subir lote TED {num_lote} tras {max_intentos} intentos.")
             
             if not exito:
-                # Opcional: puedes decidir si quieres que pare por completo o continúe con el siguiente lote
                 pass
 
         print("✅ ¡Sincronización de TED completada con éxito!")
