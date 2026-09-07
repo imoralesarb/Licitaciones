@@ -28,4 +28,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          python sincronizar_Madrid.py
+          python sincronizar_madrid.py
