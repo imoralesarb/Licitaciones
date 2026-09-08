@@ -290,15 +290,14 @@ SECTORES_CPV = {
     ],
 }
 
+# Inicializar estados de sesión para persistencia de resultados
+if "df_resultados" not in st.session_state:
+    st.session_state.df_resultados = None
+if "mensaje_estado" not in st.session_state:
+    st.session_state.mensaje_estado = ""
+
 # 4. Interfaz Visual y Gestión de Estado
 st.title("🔍 Buscador inteligente de Licitaciones")
-
-if "resultados_acumulados" not in st.session_state:
-    st.session_state.resultados_acumulados = []
-if "offset_actual" not in st.session_state:
-    st.session_state.offset_actual = 0
-if "hay_mas_registros" not in st.session_state:
-    st.session_state.hay_mas_registros = True
 
 
 def limpiar_campos():
@@ -315,9 +314,8 @@ def limpiar_campos():
     st.session_state.mostrar_todos = False
     st.session_state.usar_filtro_fechas = False
     st.session_state.usar_filtro_cierre = False
-    st.session_state.resultados_acumulados = []
-    st.session_state.offset_actual = 0
-    st.session_state.hay_mas_registros = True
+    st.session_state.df_resultados = None
+    st.session_state.mensaje_estado = ""
 
 
 # Buscador principal
@@ -613,7 +611,9 @@ if btn_novedades:
                 r["similarity"] = 1.0
 
         if not resultados:
-            st.info("No hay nuevas licitaciones ni actualizaciones en este ciclo.")
+            st.warning("No hay nuevas licitaciones ni actualizaciones en este ciclo.")
+            st.session_state.df_resultados = None
+            st.session_state.mensaje_estado = ""
         else:
             df = pd.DataFrame(resultados)
             
@@ -629,6 +629,8 @@ if btn_novedades:
 
             if df.empty:
                 st.warning("No hay novedades ni actualizaciones que coincidan con los filtros y la búsqueda indicada.")
+                st.session_state.df_resultados = None
+                st.session_state.mensaje_estado = ""
             else:
                 if not mostrar_todos:
                     total_encontrados = len(df)
@@ -636,16 +638,12 @@ if btn_novedades:
                     mostrados = len(df)
 
                     if total_encontrados > mostrados:
-                        st.success(
-                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas!"
-                        )
+                        st.session_state.mensaje_estado = f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas!"
                     else:
-                        st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
+                        st.session_state.mensaje_estado = f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!"
                 else:
                     mostrados = len(df)
-                    st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
-
-                st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
+                    st.session_state.mensaje_estado = f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!"
 
                 tabla_final = []
                 for idx, row in enumerate(df.itertuples(), start=1):
@@ -664,20 +662,7 @@ if btn_novedades:
                         "Es Actualizada": getattr(row, "es_actualizada", False),
                     })
 
-                df_final = pd.DataFrame(tabla_final)
-
-                st.dataframe(
-                    df_final.style.apply(estilizar_filas, axis=1),
-                    column_config={
-                        "Enlace": st.column_config.LinkColumn(
-                            "Enlace oficial", display_text="Ver licitación 🔗"
-                        ),
-                        "Es Novedad": None,
-                        "Es Actualizada": None,
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                )
+                st.session_state.df_resultados = pd.DataFrame(tabla_final)
 
 
 # 6. Lógica de Búsqueda Principal vía Supabase RPC
@@ -736,6 +721,8 @@ elif btn_buscar:
 
         if not resultados:
             st.warning("No se encontraron resultados que coincidan con la búsqueda.")
+            st.session_state.df_resultados = None
+            st.session_state.mensaje_estado = ""
         else:
             df = pd.DataFrame(resultados)
             if "similarity" in df.columns:
@@ -747,6 +734,8 @@ elif btn_buscar:
 
             if df.empty:
                 st.warning("No hay licitaciones que coincidan con los filtros y la búsqueda indicada.")
+                st.session_state.df_resultados = None
+                st.session_state.mensaje_estado = ""
             else:
                 if not mostrar_todos:
                     total_encontrados = len(df)
@@ -754,16 +743,12 @@ elif btn_buscar:
                     mostrados = len(df)
 
                     if total_encontrados > mostrados:
-                        st.success(
-                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas!"
-                        )
+                        st.session_state.mensaje_estado = f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas!"
                     else:
-                        st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
+                        st.session_state.mensaje_estado = f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!"
                 else:
                     mostrados = len(df)
-                    st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
-
-                st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
+                    st.session_state.mensaje_estado = f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!"
 
                 tabla_final = []
                 for idx, row in enumerate(df.itertuples(), start=1):
@@ -782,17 +767,25 @@ elif btn_buscar:
                         "Es Actualizada": getattr(row, "es_actualizada", False),
                     })
 
-                df_final = pd.DataFrame(tabla_final)
+                st.session_state.df_resultados = pd.DataFrame(tabla_final)
 
-                st.dataframe(
-                    df_final.style.apply(estilizar_filas, axis=1),
-                    column_config={
-                        "Enlace": st.column_config.LinkColumn(
-                            "Enlace oficial", display_text="Ver licitación 🔗"
-                        ),
-                        "Es Novedad": None,
-                        "Es Actualizada": None,
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                )
+
+# --- 7. RENDERIZADO PERSISTENTE DE RESULTADOS ---
+if st.session_state.df_resultados is not None and not st.session_state.df_resultados.empty:
+    if st.session_state.mensaje_estado:
+        st.success(st.session_state.mensaje_estado)
+
+    st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
+
+    st.dataframe(
+        st.session_state.df_resultados.style.apply(estilizar_filas, axis=1),
+        column_config={
+            "Enlace": st.column_config.LinkColumn(
+                "Enlace oficial", display_text="Ver licitación 🔗"
+            ),
+            "Es Novedad": None,
+            "Es Actualizada": None,
+        },
+        hide_index=True,
+        use_container_width=True,
+    )
