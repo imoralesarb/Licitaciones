@@ -304,7 +304,8 @@ if "hay_mas_registros" not in st.session_state:
 def limpiar_campos():
     st.session_state.consulta_texto = ""
     st.session_state.filtro_fuente = "🌐 Todas las fuentes"
-    st.session_state.filtro_tipo_contrato = "🌐 Todos los tipos"
+    st.session_state.filtro_tipo_contrato = []
+    # st.session_state.filtro_tipo_contrato = "🌐 Todos los tipos"
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_lugar_libre = ""
     st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
@@ -338,23 +339,28 @@ with col0:
         key="filtro_fuente",
     )
 with col_tipo:
-    filtro_tipo_contrato = st.selectbox(
+    filtro_tipo_contrato = st.multiselect(
     "📋 Tipo de contrato",
     [
-        "🌐 Todos los tipos",
         "Suministros",
         "Servicios",
         "Obras",
         "Gestión de servicios públicos",
         "Concesión de servicios",
+        "Concesión de servicios especiales",
         "Concesión de obras",
+        "Concesión de obras públicas",
         "Administrativo especial",
+        "Privado",
+        "Privado de Administración Pública",
+        "Patrimonial",
+        "Colaboración Público-Privada",
+        "Colaboración entre el sector público y el sector privado",
         "Otra legislación sectorial",
         "Contrato de servicios especiales",
-        "Privado de Administración Pública",
-        "Concesión de servicios especiales",
-        "Colaboración Público-Privada"
+        "Otros"
     ],
+    default=[], # Si lo dejas vacío, por defecto mostrará todos si aplicas bien el filtro
     key="filtro_tipo_contrato"
 )
 with col1:
@@ -465,9 +471,14 @@ def aplicar_filtros_comunes(df):
         df = df[df["fuente"].str.contains(filtro_fuente, case=False, na=False)]
 
     # 2. Filtro de tipo de contrato flexible
-    if filtro_tipo_contrato != "🌐 Todos los tipos":
+    if filtro_tipo_contrato:  # Si la lista no está vacía
         if "tipo_contrato" in df.columns:
-            df = df[df["tipo_contrato"].str.contains(filtro_tipo_contrato, case=False, na=False)]
+            # Crea una expresión regular uniendo las opciones seleccionadas con operador OR (|)
+            patron_tipos = "|".join([r"\b" + t + r"\b" for t in filtro_tipo_contrato])
+            df = df[df["tipo_contrato"].str.contains(patron_tipos, case=False, na=False, regex=True)]
+    #if filtro_tipo_contrato != "🌐 Todos los tipos":
+     #   if "tipo_contrato" in df.columns:
+      #      df = df[df["tipo_contrato"].str.contains(filtro_tipo_contrato, case=False, na=False)]
 
     # 3. Importes
     if importe_min > 0:
