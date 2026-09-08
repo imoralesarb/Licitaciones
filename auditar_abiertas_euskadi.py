@@ -53,6 +53,7 @@ def auditar_licitaciones_html_euskadi():
 
             if not enlace:
                 ids_a_borrar.append(rec_id)
+                print(f"    [A BORRAR - Sin enlace]: {titulo[:40]}... (ID: {rec_id})")
                 total_eliminadas += 1
                 continue
 
@@ -63,7 +64,9 @@ def auditar_licitaciones_html_euskadi():
 
                 if resp.status_code != 200:
                     ids_a_borrar.append(rec_id)
-                    print(f"    [A BORRAR - HTTP {resp.status_code}]: {titulo[:40]}...")
+                    print(f"    [A BORRAR - HTTP {resp.status_code}]")
+                    print(f"      -> Título: {titulo[:50]}...")
+                    print(f"      -> Enlace: {enlace}")
                     total_eliminadas += 1
                     continue
 
@@ -71,13 +74,14 @@ def auditar_licitaciones_html_euskadi():
                 soup = BeautifulSoup(resp.text, "html.parser")
                 
                 # Buscamos los bloques de texto o etiquetas <dd> que contienen los estados y plazos
-                # Basado en tu HTML, los datos clave suelen estar en listas <dl> dentro de la cabecera de detalle
                 texto_pagina = soup.get_text(separator=" ", strip=True).lower()
 
                 # Criterio de borrado: Si el texto indica que ya no está abierto o está anulado/adjudicado
                 if "anulado" in texto_pagina and "plazo de presentación" not in texto_pagina:
                     ids_a_borrar.append(rec_id)
-                    print(f"    [A BORRAR - Anulado/Cerrado en HTML]: {titulo[:40]}...")
+                    print(f"    [A BORRAR - Anulado/Cerrado en HTML]")
+                    print(f"      -> Título: {titulo[:50]}...")
+                    print(f"      -> Enlace: {enlace}")
                     total_eliminadas += 1
                     continue
 
@@ -93,7 +97,9 @@ def auditar_licitaciones_html_euskadi():
                 # Si detectamos explícitamente que está cerrado
                 if "cerrado" in estado_encontrado.lower():
                     ids_a_borrar.append(rec_id)
-                    print(f"    [A BORRAR - Plazo cerrado según HTML]: {titulo[:40]}...")
+                    print(f"    [A BORRAR - Plazo cerrado según HTML]")
+                    print(f"      -> Título: {titulo[:50]}...")
+                    print(f"      -> Enlace: {enlace}")
                     total_eliminadas += 1
                     continue
 
