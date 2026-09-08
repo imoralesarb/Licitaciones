@@ -32,26 +32,20 @@ def limpiar_importe_html(texto):
     try:
         if not texto:
             return 0.0
-        # Si ya es un número directo (int o float), lo devolvemos como float directamente
         if isinstance(texto, (int, float)):
             return float(texto)
 
-        # Eliminar cualquier caracter que no sea dígito, punto, coma o signo menos
         texto_limpio = re.sub(r'[^\d,\.-]', '', str(texto)).strip()
         if not texto_limpio:
             return 0.0
 
-        # Si tiene coma, la coma es el separador decimal europeo y los puntos son miles
         if ',' in texto_limpio:
-            texto_limpio = texto_limpio.replace('.', '')  # Quitamos los puntos de miles
-            texto_limpio = texto_limpio.replace(',', '.')  # Cambiamos la coma decimal por punto
+            texto_limpio = texto_limpio.replace('.', '')  
+            texto_limpio = texto_limpio.replace(',', '.')  
         elif '.' in texto_limpio:
-            # Si solo tiene puntos, comprobamos si actúa como miles (ej: '8.000') o decimal puro (ej: '8.50')
             partes = texto_limpio.split('.')
             if len(partes[-1]) == 3 and len(partes) > 1:
-                # Es un punto de miles sin decimales (ej: '8.000')
                 texto_limpio = texto_limpio.replace('.', '')
-            # Si tiene decimales con punto (ej: '8.50'), se deja como está
 
         return float(texto_limpio)
     except ValueError:
@@ -79,7 +73,7 @@ def normalizar_organo(org):
 
 
 # ============================================================
-# SICRONIZACIÓN
+# SINCRONIZACIÓN
 # ============================================================
 
 def sincronizar_licitaciones_euskadi():
@@ -116,41 +110,16 @@ def sincronizar_licitaciones_euskadi():
 
     print(f"Descargados {len(results)} registros totales de la API de Euskadi.\n")
 
-    # 1. Resetear flags de novedades anteriores para la fuente Euskadi
-    print("Reseteando flags de novedades anteriores...")
+    # 1. Resetear flags de novedades anteriores para la fuente Euskadi de forma masiva/segura
+    print("Reseteando flags de novedades y actualizaciones anteriores...")
     try:
-        while True:
-            res_antiguos = supabase.table("licitaciones").select("id").ilike("fuente", "%Euskadi%").eq("es_novedad", True).limit(200).execute()
-            if not res_antiguos.data:
-                break
-            ids_antiguos = [item["id"] for item in res_antiguos.data]
-            
-            for i in range(0, len(ids_antiguos), 50):
-                lote_ids = ids_antiguos[i:i+50]
-                supabase.table("licitaciones").update({
-                    "es_novedad": False,
-                    "es_actualizada": False
-                }).in_("id", lote_ids).execute()
+        supabase.table("licitaciones").update({
+            "es_novedad": False,
+            "es_actualizada": False
+        }).ilike("fuente", "%Euskadi%").execute()
         print("Flags reseteados con éxito.")
     except Exception as e:
-        print(f"Aviso al resetear flags novedad: {e}")
-
-    try:
-        while True:
-            res_antiguos = supabase.table("licitaciones").select("id").ilike("fuente", "%Euskadi%").eq("es_actualizada", True).limit(200).execute()
-            if not res_antiguos.data:
-                break
-            ids_antiguos = [item["id"] for item in res_antiguos.data]
-            
-            for i in range(0, len(ids_antiguos), 50):
-                lote_ids = ids_antiguos[i:i+50]
-                supabase.table("licitaciones").update({
-                    "es_novedad": False,
-                    "es_actualizada": False
-                }).in_("id", lote_ids).execute()
-        print("Flags reseteados con éxito.")
-    except Exception as e:
-        print(f"Aviso al resetear flags actualizada: {e}")
+        print(f"Aviso al resetear flags: {e}")
 
     # 2. Cargar registros existentes en Supabase para validar duplicados y mapear fuentes
     try:
@@ -196,7 +165,6 @@ def sincronizar_licitaciones_euskadi():
 
         organo_raw = str(aviso.get("adjudicatorEs") or aviso.get("socialReason") or "No especificado").strip()
         
-        # Extracción y limpieza segura del importe base
         importe_raw = aviso.get("budgetWithoutVAT") or aviso.get("awardAmountWithoutVAT") or 0.0
         importe = limpiar_importe_html(importe_raw)
 
@@ -217,7 +185,6 @@ def sincronizar_licitaciones_euskadi():
 
         fecha_pub = str(aviso.get("startDate") or aviso.get("awardDate") or "")[:10]
 
-        # Extracción de importe, CPV y tipo de contrato desde el detalle
         if codigo_item:
             try:
                 url_detalle = f"https://api.euskadi.eus/procurements/contracting-notices/{codigo_item}"
@@ -238,7 +205,6 @@ def sincronizar_licitaciones_euskadi():
                     if det_data.get("budgetWithoutVAT") is not None:
                         importe = limpiar_importe_html(det_data.get("budgetWithoutVAT"))
 
-                    # Obtener tipo de contrato
                     ct_obj = det_data.get("contractType")
                     if isinstance(ct_obj, dict):
                         tipo_contrato = ct_obj.get("name", "No especificado")
@@ -269,7 +235,6 @@ def sincronizar_licitaciones_euskadi():
         enlaces_ya_procesados_en_sesion.add(enlace)
         claves_sesion.add(clave_duplicado)
 
-        # Comprobar si ya existía en la base de datos (por enlace o por la tupla título/órgano)
         registro_existente = mapa_enlaces.get(enlace)
         if not registro_existente and clave_duplicado in registros_existentes:
             for item_b in mapa_enlaces.values():
@@ -279,11 +244,10 @@ def sincronizar_licitaciones_euskadi():
                     registro_existente = item_b
                     break
 
-        # Regla de fuentes y novedad solicitada
         if registro_existente:
             fuente_actual = str(registro_existente.get("fuente", ""))
             if "euskadi" not in fuente_actual.lower():
-                fuente_final = f"{fuente_actual}, euskadi" if fuente_actual else "euskadi"
+                fuente_final = f"{fuente_actual}, Euskadi" if fuente_actual else "Euskadi"
             else:
                 fuente_final = fuente_actual
             
