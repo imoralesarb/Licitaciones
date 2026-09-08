@@ -303,12 +303,15 @@ if "hay_mas_registros" not in st.session_state:
 
 def limpiar_campos():
     st.session_state.consulta_texto = ""
-    st.session_state.filtro_fuente = "🌐 Todas las fuentes"
+    st.session_state.filtro_fuente = []
+    # st.session_state.filtro_fuente = "🌐 Todas las fuentes"
     st.session_state.filtro_tipo_contrato = []
     # st.session_state.filtro_tipo_contrato = "🌐 Todos los tipos"
-    st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
+    # st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
+    st.session_state.filtro_ccaa = []
     st.session_state.filtro_lugar_libre = ""
-    st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
+    #st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
+    st.session_state.filtro_cpv_sector = []
     st.session_state.filtro_cpv_codigo = ""
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
@@ -333,9 +336,10 @@ st.markdown("### ⚙️ Filtros avanzados")
 col0, col_tipo, col1, col2, col3 = st.columns(5)
 
 with col0:
-    filtro_fuente = st.selectbox(
+    filtro_fuente = st.multiselect(
         "🌐 Fuente",
-        ["🌐 Todas las fuentes", "Licitaciones Generales PLACSP", "Licitaciones Agregadas PLACSP", "TED", "PSCP Catalunya", "Euskadi", "Comunidad de Madrid"],
+        ["Licitaciones Generales PLACSP", "Licitaciones Agregadas PLACSP", "TED", "PSCP Catalunya", "Euskadi", "Comunidad de Madrid"],
+        default=[],
         key="filtro_fuente",
     )
 with col_tipo:
@@ -369,8 +373,12 @@ with col2:
     importe_max = st.number_input("Importe Máximo (€)", value=0.0, key="importe_max")
 with col3:
     lista_ccaa = list(MAPA_TERRITORIAL.keys())
-    filtro_ccaa = st.selectbox(
-        "📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa"
+    # Opcional: elimina la opción global de "Todas" del diccionario o contrólala vacía
+    filtro_ccaa = st.multiselect(
+        "📍 Lugar de ejecución (Desplegable)", 
+        [c for c in lista_ccaa if "Todas" not in c], 
+        default=[], 
+        key="filtro_ccaa"
     )
 
 col4, col5, col6, col7 = st.columns(4)
@@ -382,8 +390,11 @@ with col4:
     )
 with col5:
     lista_sectores = list(SECTORES_CPV.keys())
-    filtro_cpv_sector = st.selectbox(
-        "📦 Sector CPV", lista_sectores, key="filtro_cpv_sector"
+    filtro_cpv_sector = st.multiselect(
+        "📦 Sector CPV", 
+        [s for s in lista_sectores if "Todos" not in s], 
+        default=[], 
+        key="filtro_cpv_sector"
     )
 with col6:
     filtro_cpv_codigo = st.text_input(
@@ -466,9 +477,10 @@ def aplicar_filtros_comunes(df):
     if df.empty:
         return df
 
-    # 1. Filtro de fuente flexible (ej. buscar "euskadi" dentro de la cadena)
-    if filtro_fuente != "🌐 Todas las fuentes":
-        df = df[df["fuente"].str.contains(filtro_fuente, case=False, na=False)]
+    # 1. Filtro de fuente flexible para múltiples selecciones
+    if filtro_fuente:
+        patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
+        df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
 
     # 2. Filtro de tipo de contrato flexible
     if filtro_tipo_contrato:  # Si la lista no está vacía
@@ -487,18 +499,17 @@ def aplicar_filtros_comunes(df):
         df = df[df["importe"] <= importe_max]
 
     # 4. CCAA
-    if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
-        palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
-        if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
-            patrones = []
+    if filtro_ccaa:
+        palabras_clave_totales = []
+        patrones = []
+        for item_ccaa in filtro_ccaa:
+            palabras_clave = MAPA_TERRITORIAL.get(item_ccaa, [item_ccaa])
             for p in palabras_clave:
                 if p == "Palma":
                     patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
                 else:
                     patrones.append(r"\b" + p + r"\b")
-            patron_regex = "|".join(patrones)
-        else:
-            patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
+        patron_regex = "|".join(patrones)
         df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False, regex=True)]
 
     # 5. Lugar libre
@@ -506,13 +517,18 @@ def aplicar_filtros_comunes(df):
         df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
 
     # 6. Sector CPV
-    if filtro_cpv_sector != "🌐 Todos los sectores CPV":
-        prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
+    if filtro_cpv_sector:
+        prefijos_validos = []
+        for s in filtro_cpv_sector:
+            prefijos_validos.extend(SECTORES_CPV[s])
+        prefijos_validos = tuple(prefijos_validos)
+        
         def coincide_cpv(cpv_str):
             if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
                 return False
             lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
             return any(c.startswith(prefijos_validos) for c in lista_cpv)
+            
         if "cpv" in df.columns:
             df = df[df["cpv"].apply(coincide_cpv)]
 
