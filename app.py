@@ -69,36 +69,6 @@ with st.spinner("Cargando modelo de IA..."):
     encoder = cargar_modelo()
 
 
-# 3. Descarga auxiliar optimizada solo para el botón de Novedades
-@st.cache_data(ttl=600)
-def obtener_novedades_supabase():
-    todos_los_datos = []
-    tamano_lote = 1000
-    inicio = 0
-
-    while True:
-        response = (
-            supabase.table("licitaciones")
-            .select(
-                "titulo, organo, fecha, importe, enlace, lugar_ejecucion, fecha_fin,"
-                " cpv, fuente, es_novedad, es_actualizada"
-            )
-            .range(inicio, inicio + tamano_lote - 1)
-            .execute()
-        )
-
-        filas = response.data
-        if not filas:
-            break
-
-        todos_los_datos.extend(filas)
-        if len(filas) < tamano_lote:
-            break
-        inicio += tamano_lote
-
-    return todos_los_datos
-
-
 # MAPA TERRITORIAL COMPLETO DE ESPAÑA
 MAPA_TERRITORIAL = {
     "🌐 Todas las CCAA / Ubicaciones": [],
@@ -334,6 +304,7 @@ if "hay_mas_registros" not in st.session_state:
 def limpiar_campos():
     st.session_state.consulta_texto = ""
     st.session_state.filtro_fuente = "🌐 Todas las fuentes"
+    st.session_state.filtro_tipo_contrato = "🌐 Todos los tipos"
     st.session_state.filtro_ccaa = "🌐 Todas las CCAA / Ubicaciones"
     st.session_state.filtro_lugar_libre = ""
     st.session_state.filtro_cpv_sector = "🌐 Todos los sectores CPV"
@@ -358,13 +329,19 @@ consulta_texto = st.text_input(
 
 # Panel de filtros avanzados
 st.markdown("### ⚙️ Filtros avanzados")
-col0, col1, col2, col3, col4 = st.columns(5)
+col0, col_tipo, col1, col2, col3 = st.columns(5)
 
 with col0:
     filtro_fuente = st.selectbox(
         "🌐 Fuente",
-        ["🌐 Todas las fuentes", "Licitaciones Generales PLACSP", "Licitaciones Agregadas PLACSP", "TED", "PSCP Catalunya", 'Euskadi', "Comunidad de Madrid"],
+        ["🌐 Todas las fuentes", "Licitaciones Generales PLACSP", "Licitaciones Agregadas PLACSP", "TED", "PSCP Catalunya", "Euskadi", "Comunidad de Madrid"],
         key="filtro_fuente",
+    )
+with col_tipo:
+    filtro_tipo_contrato = st.selectbox(
+        "📋 Tipo de contrato",
+        ["🌐 Todos los tipos", "Suministros", "Servicios", "Obras", "Gestión de servicios públicos", "Concesión de servicios", "Concesión de obras"],
+        key="filtro_tipo_contrato",
     )
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
@@ -375,14 +352,14 @@ with col3:
     filtro_ccaa = st.selectbox(
         "📍 Lugar de ejecución (Desplegable)", lista_ccaa, key="filtro_ccaa"
     )
+
+col4, col5, col6, col7 = st.columns(4)
 with col4:
     filtro_lugar_libre = st.text_input(
         "📍 Lugar de ejecución (Libre)",
         placeholder="ej. San Sebastián",
         key="filtro_lugar_libre",
     )
-
-col5, col6, col7 = st.columns(3)
 with col5:
     lista_sectores = list(SECTORES_CPV.keys())
     filtro_cpv_sector = st.selectbox(
@@ -422,7 +399,7 @@ if usar_filtro_cierre:
     col_c1, _ = st.columns([1, 1])
     with col_c1:
         fecha_cierre_tope = st.date_input(
-            "Fecha tope mínima de fin de presentación (Muestra las que acaban en este día o después)", value=date(2026, 3, 1)
+            "Fecha tope mínima de fin de presentación", value=date(2026, 3, 1)
         )
 
 st.write("")
@@ -464,33 +441,116 @@ def estilizar_filas(row):
     return [""] * len(row)
 
 
-# 5. Lógica Separada del Botón de Novedades
-# 5. Lógica del Botón de Novedades (con soporte para embeddings y todos los filtros)
+# Función genérica para aplicar todos los filtros de Pandas en común
+def aplicar_filtros_comunes(df):
+    if df.empty:
+        return df
+
+    # 1. Filtro de fuente flexible (ej. buscar "euskadi" dentro de la cadena)
+    if filtro_fuente != "🌐 Todas las fuentes":
+        df = df[df["fuente"].str.contains(filtro_fuente, case=False, na=False)]
+
+    # 2. Filtro de tipo de contrato flexible
+    if filtro_tipo_contrato != "🌐 Todos los tipos":
+        if "tipo_contrato" in df.columns:
+            df = df[df["tipo_contrato"].str.contains(filtro_tipo_contrato, case=False, na=False)]
+
+    # 3. Importes
+    if importe_min > 0:
+        df = df[df["importe"] >= importe_min]
+    if importe_max > 0:
+        df = df[df["importe"] <= importe_max]
+
+    # 4. CCAA
+    if filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
+        palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
+        if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
+            patrones = []
+            for p in palabras_clave:
+                if p == "Palma":
+                    patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
+                else:
+                    patrones.append(r"\b" + p + r"\b")
+            patron_regex = "|".join(patrones)
+        else:
+            patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
+        df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False, regex=True)]
+
+    # 5. Lugar libre
+    if filtro_lugar_libre.strip():
+        df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
+
+    # 6. Sector CPV
+    if filtro_cpv_sector != "🌐 Todos los sectores CPV":
+        prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
+        def coincide_cpv(cpv_str):
+            if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                return False
+            lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+            return any(c.startswith(prefijos_validos) for c in lista_cpv)
+        if "cpv" in df.columns:
+            df = df[df["cpv"].apply(coincide_cpv)]
+
+    # 7. Código CPV específico
+    if filtro_cpv_codigo.strip():
+        codigo_busqueda = filtro_cpv_codigo.strip()
+        def coincide_codigo_cpv(cpv_str):
+            if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+                return False
+            lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
+            return any(codigo_busqueda in c for c in lista_cpv)
+        if "cpv" in df.columns:
+            df = df[df["cpv"].apply(coincide_codigo_cpv)]
+
+    # 8. Fechas de cierre
+    if usar_filtro_cierre:
+        def filtrar_fecha_fin(f_str):
+            if not f_str:
+                return False
+            try:
+                return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+            except ValueError:
+                return False
+        if "fecha_fin" in df.columns:
+            df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
+
+    # 9. Fechas de publicación
+    if usar_filtro_fechas:
+        def filtrar_fecha_pub(f_str):
+            if not f_str:
+                return False
+            try:
+                return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
+            except ValueError:
+                return False
+        if "fecha" in df.columns:
+            df = df[df["fecha"].apply(filtrar_fecha_pub)]
+
+    return df
+
+
+# 5. Lógica del Botón de Novedades
 if btn_novedades:
     with st.spinner("Buscando en novedades y actualizaciones..."):
         resultados = []
         consulta_texto_val = consulta_texto if 'consulta_texto' in locals() else ""
 
-        # ESCENARIO A Novedades: Si hay texto, usamos la búsqueda por embeddings (igual que el buscador principal)
         if consulta_texto_val.strip():
             query_con_prefijo = f"query: {consulta_texto_val.strip()}"
             vector_query = encoder.encode(query_con_prefijo).tolist()
 
             try:
-                # Llamamos a tu función RPC de Supabase
                 response = supabase.rpc(
                     "buscar_licitaciones",
                     {
                         "query_embedding": vector_query,
                         "match_threshold": 0.2,
-                        "match_count": 999999 # Pedimos un número alto para luego filtrar solo las que sean novedad/actualizada
+                        "match_count": 999999
                     },
                 ).execute()
                 resultados = response.data
             except Exception as e:
                 st.error(f"⚠️ Error al ejecutar la búsqueda vectorial en novedades: {e}")
-
-        # ESCENARIO B Novedades: Si no hay texto, descargamos todas las novedades directamente
         else:
             todos_los_datos = []
             tamano_lote = 1000
@@ -501,9 +561,9 @@ if btn_novedades:
                     supabase.table("licitaciones")
                     .select(
                         "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
-                        " fecha_fin, texto_completo, cpv, fuente, es_novedad, es_actualizada"
+                        " fecha_fin, texto_completo, cpv, fuente, tipo_contrato, es_novedad, es_actualizada"
                     )
-                    .or_("es_novedad.eq.true,es_actualizada.eq.true") # Traemos directamente solo las novedades/actualizadas de Supabase
+                    .or_("es_novedad.eq.true,es_actualizada.eq.true")
                     .range(inicio, inicio + tamano_lote - 1)
                     .execute()
                 )
@@ -525,7 +585,6 @@ if btn_novedades:
         else:
             df = pd.DataFrame(resultados)
             
-            # Asegurarnos de filtrar estrictamente por novedad o actualizada (por si el RPC trajo de más)
             if "es_novedad" in df.columns and "es_actualizada" in df.columns:
                 df = df[(df["es_novedad"] == True) | (df["es_actualizada"] == True)]
 
@@ -534,73 +593,7 @@ if btn_novedades:
             else:
                 df["relevancia"] = 100.0
 
-            # --- APLICAR EL RESTO DE FILTROS (Fuente, Importe, CCAA, CPV, Fechas...) ---
-            if not df.empty and filtro_fuente != "🌐 Todas las fuentes":
-                df = df[df["fuente"] == filtro_fuente]
-
-            if not df.empty and importe_min > 0:
-                df = df[df["importe"] >= importe_min]
-            if not df.empty and importe_max > 0:
-                df = df[df["importe"] <= importe_max]
-
-            if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
-                palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
-                if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
-                    patrones = []
-                    for p in palabras_clave:
-                        if p == "Palma":
-                            patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
-                        else:
-                            patrones.append(r"\b" + p + r"\b")
-                    patron_regex = "|".join(patrones)
-                else:
-                    patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
-                df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False, regex=True)]
-
-            if not df.empty and filtro_lugar_libre.strip():
-                df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
-
-            if not df.empty and filtro_cpv_sector != "🌐 Todos los sectores CPV":
-                prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
-                def coincide_cpv(cpv_str):
-                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
-                        return False
-                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-                    return any(c.startswith(prefijos_validos) for c in lista_cpv)
-                if "cpv" in df.columns:
-                    df = df[df["cpv"].apply(coincide_cpv)]
-
-            if not df.empty and filtro_cpv_codigo.strip():
-                codigo_busqueda = filtro_cpv_codigo.strip()
-                def coincide_codigo_cpv(cpv_str):
-                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
-                        return False
-                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-                    return any(codigo_busqueda in c for c in lista_cpv)
-                if "cpv" in df.columns:
-                    df = df[df["cpv"].apply(coincide_codigo_cpv)]
-
-            if not df.empty and usar_filtro_cierre:
-                def filtrar_fecha_fin(f_str):
-                    if not f_str:
-                        return False
-                    try:
-                        return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
-                    except ValueError:
-                        return False
-                if "fecha_fin" in df.columns:
-                    df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
-
-            if not df.empty and usar_filtro_fechas:
-                def filtrar_fecha_pub(f_str):
-                    if not f_str:
-                        return False
-                    try:
-                        return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
-                    except ValueError:
-                        return False
-                if "fecha" in df.columns:
-                    df = df[df["fecha"].apply(filtrar_fecha_pub)]
+            df = aplicar_filtros_comunes(df)
 
             if df.empty:
                 st.warning("No hay novedades ni actualizaciones que coincidan con los filtros y la búsqueda indicada.")
@@ -612,8 +605,7 @@ if btn_novedades:
 
                     if total_encontrados > mostrados:
                         st.success(
-                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas! "
-                            f"(Ajusta la barra de resultados o activa 'Mostrar TODOS los resultados' para ver el resto)."
+                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas!"
                         )
                     else:
                         st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
@@ -630,6 +622,7 @@ if btn_novedades:
                         "Relevancia (%)": f"{getattr(row, 'relevancia', 100.0):.2f} %",
                         "Título": row.titulo,
                         "Órgano": row.organo,
+                        "Tipo Contrato": getattr(row, "tipo_contrato", "No especificado"),
                         "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
                         "Cierre": getattr(row, "fecha_fin", "No especificada"),
                         "Fecha Pub.": row.fecha,
@@ -654,19 +647,16 @@ if btn_novedades:
                     use_container_width=True,
                 )
 
-# 6. Lógica de Búsqueda Principal vía Supabase RPC (Independiente de Novedades)
+
+# 6. Lógica de Búsqueda Principal vía Supabase RPC
 elif btn_buscar:
     with st.spinner("Buscando en Supabase..."):
         resultados = []
         consulta_texto_val = consulta_texto if 'consulta_texto' in locals() else ""
 
-        # ESCENARIO A: Búsqueda Semántica con Texto
         if consulta_texto_val.strip():
             query_con_prefijo = f"query: {consulta_texto_val.strip()}"
             vector_query = encoder.encode(query_con_prefijo).tolist()
-
-            # Si el usuario quiere ver todo o usa filtros complejos, pedimos un match_count masivo
-            # match_count_deseado = 999999 if (mostrar_todos or usar_filtro_fechas or usar_filtro_cierre) else max(limite_resultados * 3, 50)
             match_count_deseado = 999999
 
             try:
@@ -681,8 +671,6 @@ elif btn_buscar:
                 resultados = response.data
             except Exception as e:
                 st.error(f"⚠️ Error al ejecutar la búsqueda vectorial: {e}")
-
-        # ESCENARIO B: Búsqueda general sin texto (Descarga por lotes de toda la tabla)
         else:
             todos_los_datos = []
             tamano_lote = 1000
@@ -693,7 +681,7 @@ elif btn_buscar:
                     supabase.table("licitaciones")
                     .select(
                         "titulo, organo, fecha, importe, enlace, lugar_ejecucion,"
-                        " fecha_fin, texto_completo, cpv, fuente, es_novedad, es_actualizada"
+                        " fecha_fin, texto_completo, cpv, fuente, tipo_contrato, es_novedad, es_actualizada"
                     )
                     .order("fecha", desc=True)
                     .range(inicio, inicio + tamano_lote - 1)
@@ -706,14 +694,8 @@ elif btn_buscar:
                     break
                 
                 todos_los_datos.extend(filas)
-                
-                # Si es una búsqueda rápida sin filtros complejos, cortamos en el primer lote
-                #if not mostrar_todos and not usar_filtro_fechas and not usar_filtro_cierre:
-                    #break
-                    
                 if len(filas) < tamano_lote:
                     break
-                    
                 inicio += tamano_lote
 
             resultados = todos_los_datos
@@ -721,9 +703,7 @@ elif btn_buscar:
                 r["similarity"] = 1.0
 
         if not resultados:
-            st.warning(
-                "No se encontraron resultados que coincidan con la búsqueda."
-            )
+            st.warning("No se encontraron resultados que coincidan con la búsqueda.")
         else:
             df = pd.DataFrame(resultados)
             if "similarity" in df.columns:
@@ -731,89 +711,7 @@ elif btn_buscar:
             else:
                 df["relevancia"] = 100.0
 
-            # Filtros en Pandas (Fuente, Importe, CCAA, CPV, Fechas...)
-            if not df.empty and filtro_fuente != "🌐 Todas las fuentes":
-                df = df[df["fuente"] == filtro_fuente]
-
-            if not df.empty and importe_min > 0:
-                df = df[df["importe"] >= importe_min]
-            if not df.empty and importe_max > 0:
-                df = df[df["importe"] <= importe_max]
-
-            if not df.empty and filtro_ccaa != "🌐 Todas las CCAA / Ubicaciones":
-                palabras_clave = MAPA_TERRITORIAL.get(filtro_ccaa, [filtro_ccaa])
-                if "Baleares" in filtro_ccaa or "Balears" in filtro_ccaa:
-                    patrones = []
-                    for p in palabras_clave:
-                        if p == "Palma":
-                            patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
-                        else:
-                            patrones.append(r"\b" + p + r"\b")
-                    patron_regex = "|".join(patrones)
-                else:
-                    patron_regex = "|".join([r"\b" + p + r"\b" for p in palabras_clave])
-                df = df[
-                    df["lugar_ejecucion"].str.contains(
-                        patron_regex, case=False, na=False, regex=True
-                    )
-                ]
-
-            if not df.empty and filtro_lugar_libre.strip():
-                df = df[
-                    df["lugar_ejecucion"].str.contains(
-                        filtro_lugar_libre.strip(), case=False, na=False
-                    )
-                ]
-
-            if not df.empty and filtro_cpv_sector != "🌐 Todos los sectores CPV":
-                prefijos_validos = tuple(SECTORES_CPV[filtro_cpv_sector])
-
-                def coincide_cpv(cpv_str):
-                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
-                        return False
-                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-                    return any(c.startswith(prefijos_validos) for c in lista_cpv)
-
-                if "cpv" in df.columns:
-                    df = df[df["cpv"].apply(coincide_cpv)]
-
-            if not df.empty and filtro_cpv_codigo.strip():
-                codigo_busqueda = filtro_cpv_codigo.strip()
-
-                def coincide_codigo_cpv(cpv_str):
-                    if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
-                        return False
-                    lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-                    return any(codigo_busqueda in c for c in lista_cpv)
-
-                if "cpv" in df.columns:
-                    df = df[df["cpv"].apply(coincide_codigo_cpv)]
-
-            if not df.empty and usar_filtro_cierre:
-
-                def filtrar_fecha_fin(f_str):
-                    if not f_str:
-                        return False
-                    try:
-                        return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
-                    except ValueError:
-                        return False
-
-                if "fecha_fin" in df.columns:
-                    df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
-
-            if not df.empty and usar_filtro_fechas:
-
-                def filtrar_fecha_pub(f_str):
-                    if not f_str:
-                        return False
-                    try:
-                        return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
-                    except ValueError:
-                        return False
-
-                if "fecha" in df.columns:
-                    df = df[df["fecha"].apply(filtrar_fecha_pub)]
+            df = aplicar_filtros_comunes(df)
 
             if df.empty:
                 st.warning("No hay licitaciones que coincidan con los filtros y la búsqueda indicada.")
@@ -825,8 +723,7 @@ elif btn_buscar:
 
                     if total_encontrados > mostrados:
                         st.success(
-                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas! "
-                            f"(Ajusta la barra de resultados o activa 'Mostrar TODOS los resultados' para ver el resto)."
+                            f"¡Mostrando las **{mostrados} licitaciones más relevantes** de un total de **{total_encontrados}** encontradas!"
                         )
                     else:
                         st.success(f"¡Se han encontrado y mostrado las {mostrados} licitaciones relevantes!")
@@ -843,6 +740,7 @@ elif btn_buscar:
                         "Relevancia (%)": f"{getattr(row, 'relevancia', 100.0):.2f} %",
                         "Título": row.titulo,
                         "Órgano": row.organo,
+                        "Tipo Contrato": getattr(row, "tipo_contrato", "No especificado"),
                         "Lugar": getattr(row, "lugar_ejecucion", "No especificado"),
                         "Cierre": getattr(row, "fecha_fin", "No especificada"),
                         "Fecha Pub.": row.fecha,
