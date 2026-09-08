@@ -1,7 +1,9 @@
 from datetime import datetime, date, timedelta
 import os
 import time
+import re
 import requests
+from bs4 import BeautifulSoup
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client
 
@@ -20,6 +22,41 @@ encoder = SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
 # ============================================================
 # FUNCIONES AUXILIARES
 # ============================================================
+
+def limpiar_importe_html(texto):
+    """Limpia cadenas de texto de importes forzando estrictamente el formato europeo:
+        Punto (.) = separador de miles.
+        Coma (,) = separador decimal.
+        Ejemplos: '19.880,50' -> 19880.5 | '8.000' -> 8000.0 | '7.232,2' -> 7232.2
+    """
+    try:
+        if not texto:
+            return 0.0
+        # Si ya es un número directo (int o float), lo devolvemos como float directamente
+        if isinstance(texto, (int, float)):
+            return float(texto)
+
+        # Eliminar cualquier caracter que no sea dígito, punto, coma o signo menos
+        texto_limpio = re.sub(r'[^\d,\.-]', '', str(texto)).strip()
+        if not texto_limpio:
+            return 0.0
+
+        # Si tiene coma, la coma es el separador decimal europeo y los puntos son miles
+        if ',' in texto_limpio:
+            texto_limpio = texto_limpio.replace('.', '')  # Quitamos los puntos de miles
+            texto_limpio = texto_limpio.replace(',', '.')  # Cambiamos la coma decimal por punto
+        elif '.' in texto_limpio:
+            # Si solo tiene puntos, comprobamos si actúa como miles (ej: '8.000') o decimal puro (ej: '8.50')
+            partes = texto_limpio.split('.')
+            if len(partes[-1]) == 3 and len(partes) > 1:
+                # Es un punto de miles sin decimales (ej: '8.000')
+                texto_limpio = texto_limpio.replace('.', '')
+            # Si tiene decimales con punto (ej: '8.50'), se deja como está
+
+        return float(texto_limpio)
+    except ValueError:
+        return 0.0
+
 
 def procesar_lugar_euskadi(lugar_raw):
     """Añade País Vasco al lugar de ejecución detectado."""
@@ -115,23 +152,6 @@ def sincronizar_licitaciones_euskadi():
     except Exception as e:
         print(f"Aviso al resetear flags actualizada: {e}")
 
-    try:
-        while True:
-            res_antiguos = supabase.table("licitaciones").select("id").ilike("fuente", "%Euskadi%").eq("es_novedad", True).limit(200).execute()
-            if not res_antiguos.data:
-                break
-            ids_antiguos = [item["id"] for item in res_antiguos.data]
-            
-            for i in range(0, len(ids_antiguos), 50):
-                lote_ids = ids_antiguos[i:i+50]
-                supabase.table("licitaciones").update({
-                    "es_novedad": False,
-                    "es_actualizada": False
-                }).in_("id", lote_ids).execute()
-        print("Flags reseteados con éxito.")
-    except Exception as e:
-        print(f"Aviso al resetear flags: {e}")
-
     # 2. Cargar registros existentes en Supabase para validar duplicados y mapear fuentes
     try:
         existentes_resp = supabase.table("licitaciones").select("id, enlace, titulo, organo, fuente").execute()
@@ -175,7 +195,11 @@ def sincronizar_licitaciones_euskadi():
         ).strip()
 
         organo_raw = str(aviso.get("adjudicatorEs") or aviso.get("socialReason") or "No especificado").strip()
-        importe = float(aviso.get("budgetWithoutVAT") or aviso.get("awardAmountWithoutVAT") or 0.0)
+        
+        # Extracción y limpieza segura del importe base
+        importe_raw = aviso.get("budgetWithoutVAT") or aviso.get("awardAmountWithoutVAT") or 0.0
+        importe = limpiar_importe_html(importe_raw)
+
         tipo_contrato = "No especificado"
         cpv = "No especificado"
 
@@ -212,7 +236,7 @@ def sincronizar_licitaciones_euskadi():
                         organo_raw = org_name
 
                     if det_data.get("budgetWithoutVAT") is not None:
-                        importe = float(det_data.get("budgetWithoutVAT"))
+                        importe = limpiar_importe_html(det_data.get("budgetWithoutVAT"))
 
                     # Obtener tipo de contrato
                     ct_obj = det_data.get("contractType")
@@ -248,7 +272,6 @@ def sincronizar_licitaciones_euskadi():
         # Comprobar si ya existía en la base de datos (por enlace o por la tupla título/órgano)
         registro_existente = mapa_enlaces.get(enlace)
         if not registro_existente and clave_duplicado in registros_existentes:
-            # Buscar en mapa_enlaces el registro que coincida con la clave duplicada si el enlace no matcheaba directamente
             for item_b in mapa_enlaces.values():
                 t_b = str(item_b.get("titulo", "")).strip().lower()
                 o_b = normalizar_organo(item_b.get("organo", ""))
@@ -264,7 +287,6 @@ def sincronizar_licitaciones_euskadi():
             else:
                 fuente_final = fuente_actual
             
-            # Si ya existía, actualizamos únicamente el campo fuente en la BDD para ese ID y no tocamos nada más
             try:
                 supabase.table("licitaciones").update({
                     "fuente": fuente_final
@@ -273,7 +295,7 @@ def sincronizar_licitaciones_euskadi():
             except Exception as e:
                 print(f"Error actualizando fuente para el registro existente {registro_existente.get('id')}: {e}")
             
-            continue  # No se vuelve a meter ni modifica nada más de este registro
+            continue  
         else:
             fuente_final = "Euskadi"
             es_nuevo = True
