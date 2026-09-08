@@ -339,10 +339,24 @@ with col0:
     )
 with col_tipo:
     filtro_tipo_contrato = st.selectbox(
-        "📋 Tipo de contrato",
-        ["🌐 Todos los tipos", "Suministros", "Servicios", "Obras", "Gestión de servicios públicos", "Concesión de servicios", "Concesión de obras"],
-        key="filtro_tipo_contrato",
-    )
+    "📋 Tipo de contrato",
+    [
+        "🌐 Todos los tipos",
+        "Suministros",
+        "Servicios",
+        "Obras",
+        "Gestión de servicios públicos",
+        "Concesión de servicios",
+        "Concesión de obras",
+        "Administrativo especial",
+        "Otra legislación sectorial",
+        "Contrato de servicios especiales",
+        "Privado de Administración Pública",
+        "Concesión de servicios especiales",
+        "Colaboración Público-Privada"
+    ],
+    key="filtro_tipo_contrato"
+)
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
 with col2:
