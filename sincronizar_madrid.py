@@ -58,6 +58,50 @@ def _texto(el, xpath, ns=NS):
     nodo = el.find(xpath, ns)
     return nodo.text.strip() if nodo is not None and nodo.text else None
 
+def traducir_tipo_contrato_madrid(codigo_raw):
+    """Traduce o mapea el código o texto del tipo de contrato de la Comunidad de Madrid (PLACE) al estándar."""
+    if not codigo_raw:
+        return "No especificado"
+    
+    limpio = str(codigo_raw).strip().lower()
+    
+    mapping_codigos = {
+        "1": "Suministros",
+        "2": "Servicios",
+        "3": "Obras",
+        "4": "Concesión de obras",
+        "5": "Gestión de servicios públicos",
+        "6": "Concesión de servicios",
+        "7": "Colaboración entre el sector público y el sector privado",
+        "8": "Administrativo especial",
+        "21": "Privado",
+        "patrimonial": "Patrimonial",
+        "otros": "Otros"
+    }
+    
+    if limpio in mapping_codigos:
+        return mapping_codigos[limpio]
+    
+    mapping_texto = {
+        "obres": "Obras",
+        "obras": "Obras",
+        "serveis": "Servicios",
+        "servicios": "Servicios",
+        "subministraments": "Suministros",
+        "suministros": "Suministros",
+        "concesión de obras públicas": "Concesión de obras públicas",
+        "concesión de obras": "Concesión de obras",
+        "gestión de servicios públicos": "Gestión de servicios públicos",
+        "concesión de servicios": "Concesión de servicios",
+        "colaboración entre el sector público y el sector privado": "Colaboración entre el sector público y el sector privado",
+        "administrativo especial": "Administrativo especial",
+        "privado": "Privado",
+        "patrimonial": "Patrimonial",
+        "otros": "Otros"
+    }
+    
+    return mapping_texto.get(limpio, str(codigo_raw).capitalize())
+
 # ============================================================
 # 3. SINCRONIZACIÓN COMUNIDAD DE MADRID
 # ============================================================
@@ -222,6 +266,14 @@ def sincronizar_licitaciones_madrid():
             if lugar_el is not None and lugar_el.text:
                 lugar_ejecucion = MAPEO_NUTS.get(lugar_el.text.strip(), lugar_el.text.strip())
 
+        # Extracción y traducción del tipo de contrato (cbc:TypeCode)
+        type_code_el = entry.find(".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:TypeCode", NS)
+        if type_code_el is None:
+            type_code_el = entry.find(".//cbc:TypeCode", NS)
+        
+        tipo_contrato_raw = type_code_el.text.strip() if type_code_el is not None and type_code_el.text else "No especificado"
+        tipo_contrato = traducir_tipo_contrato_madrid(tipo_contrato_raw)
+
         importe = 0.0
         presupuesto_el = entry.find(".//cac:BudgetAmount/cbc:EstimatedOverallContractAmount", NS)
         if presupuesto_el is None:
@@ -240,7 +292,28 @@ def sincronizar_licitaciones_madrid():
 
         clave_duplicado = (titulo_str.strip().lower(), organo_base)
         
-        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
+        # Validación de duplicados / existencia previa y gestión de fuentes o tipo de contrato faltante
+        if enlace in registros_db:
+            reg_antiguo = registros_db[enlace]
+            fuente_actual = reg_antiguo.get("fuente", "")
+            tipo_actual = reg_antiguo.get("tipo_contrato", "")
+            
+            actualizar_datos = {}
+            if "Comunidad de Madrid" not in fuente_actual:
+                nueva_fuente = f"{fuente_actual}, Comunidad de Madrid" if fuente_actual else "Comunidad de Madrid"
+                actualizar_datos["fuente"] = nueva_fuente
+
+            if (not tipo_actual or tipo_actual == "No especificado") and tipo_contrato != "No especificado":
+                actualizar_datos["tipo_contrato"] = tipo_contrato
+
+            if actualizar_datos:
+                try:
+                    supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
+                    reg_antiguo.update(actualizar_datos)
+                except Exception as e:
+                    print(f"Error actualizando registro existente Madrid {enlace}: {e}")
+
+        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo}. Tipo de contrato: {tipo_contrato}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
         
         es_nuevo = enlace not in registros_db and clave_duplicado not in registros_existentes
         es_actualizado = False
@@ -265,6 +338,7 @@ def sincronizar_licitaciones_madrid():
             "fecha_fin": fecha_fin_str,
             "lugar_ejecucion": lugar_ejecucion,
             "cpv": cpv_codigo,
+            "tipo_contrato": tipo_contrato,
             "es_novedad": es_nuevo,
             "es_actualizada": es_actualizado,
             "fuente": "Comunidad de Madrid"
