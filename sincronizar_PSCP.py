@@ -19,6 +19,31 @@ print("Cargando modelo de IA (multilingual-e5-small)...")
 encoder = SentenceTransformer("intfloat/multilingual-e5-small", device="cpu")
 
 
+def traducir_tipo_contrato(tipus_cat):
+    """Traduce exhaustivamente todos los tipos de contrato de la PSCP al castellano para la BBDD."""
+    if not tipus_cat:
+        return "No especificado"
+    
+    limpio = str(tipus_cat).strip().lower()
+    
+    mapping = {
+        "serveis": "Servicios",
+        "subministraments": "Suministros",
+        "obres": "Obras",
+        "no especificado": "No especificado",
+        "administratiu especial": "Administrativo especial",
+        "concessió de serveis": "Concesión de servicios",
+        "altra legislació sectorial": "Otra legislación sectorial",
+        "contracte de serveis especials (annex iv)": "Contrato de servicios especiales",
+        "privat d'administració pública": "Privado de Administración Pública",
+        "concessió d'obres": "Concesión de obras",
+        "concessió de serveis especials (annex iv)": "Concesión de servicios especiales",
+        "col·laboració públic-privat": "Colaboración Público-Privada"
+    }
+    
+    return mapping.get(limpio, str(tipus_cat).capitalize())
+
+
 def procesar_lugar(lugar_raw):
     lugar_limpio = str(lugar_raw).strip() if lugar_raw else "No especificado"
     if lugar_limpio == "No especificado" or not lugar_limpio:
@@ -66,7 +91,7 @@ def sincronizar_licitaciones_pscp():
 
     print(f"Total registros obtenidos de la API PSCP: {len(results)}")
 
-    # 1. Solución al Timeout: Resetear flags mediante paginación por lotes pequeños
+    # 1. Resetear flags de novedades anteriores
     print("Reseteando flags de novedades anteriores...")
     try:
         while True:
@@ -85,9 +110,9 @@ def sincronizar_licitaciones_pscp():
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
 
-    # 2. Cargar registros existentes en Supabase para validar duplicados y actualizaciones
+    # 2. Cargar todos los registros existentes en Supabase para validar duplicados y actualizar fuentes globales
     try:
-        existentes_resp = supabase.table("licitaciones").select("*").eq("fuente", "PSCP Catalunya").execute()
+        existentes_resp = supabase.table("licitaciones").select("enlace, titulo, organo, fuente, tipo_contrato, fecha_fin, importe").execute()
         registros_db = {item["enlace"]: item for item in existentes_resp.data if "enlace" in item}
     except Exception as e:
         print(f"Error conectando con Supabase para lectura: {e}")
@@ -132,22 +157,50 @@ def sincronizar_licitaciones_pscp():
         lugar_bruto = aviso.get("lloc_execucio", "No especificado")
         lugar_ejecucion = procesar_lugar(lugar_bruto)
 
+        # Extracción y traducción del tipo de contrato
+        tipus_cat = aviso.get("tipus_contracte", "No especificado")
+        tipo_contrato = traducir_tipo_contrato(tipus_cat)
+
         if enlace in enlaces_procesados_sesion:
             continue
         enlaces_procesados_sesion.add(enlace)
 
-        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo_str}. CPV: {cpv}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
+        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo_str}. Tipo de contrato: {tipo_contrato}. CPV: {cpv}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
         
-        es_nuevo = enlace not in registros_db
-        es_actualizado = False
-
-        if not es_nuevo:
+        if enlace in registros_db:
+            # El registro ya existe en la BBDD: actualizamos fuente y tipo si procede, sin duplicar
             reg_antiguo = registros_db[enlace]
-            if (reg_antiguo.get("titulo") != titulo_str or 
-                reg_antiguo.get("importe") != importe or 
-                reg_antiguo.get("fecha_fin") != fecha_fin_str):
-                es_actualizado = True
+            fuente_actual = reg_antiguo.get("fuente", "")
+            tipo_actual = reg_antiguo.get("tipo_contrato", "")
+            
+            actualizar_datos = {}
+            
+            # Añadir fuente al final si no la tiene
+            if "PSCP Catalunya" not in fuente_actual:
+                nueva_fuente = f"{fuente_actual}, PSCP Catalunya" if fuente_actual else "PSCP Catalunya"
+                actualizar_datos["fuente"] = nueva_fuente
 
+            # Añadir tipo de contrato si está vacío o no especificado
+            if (not tipo_actual or tipo_actual == "No especificado") and tipo_contrato != "No especificado":
+                actualizar_datos["tipo_contrato"] = tipo_contrato
+
+            # Detectar si hay cambios para marcar como actualizado
+            es_actualizado = (
+                reg_antiguo.get("titulo") != titulo_str or 
+                reg_antiguo.get("importe") != importe or 
+                reg_antiguo.get("fecha_fin") != fecha_fin_str
+            )
+            if es_actualizado:
+                actualizar_datos["es_actualizada"] = True
+
+            if actualizar_datos:
+                try:
+                    supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
+                except Exception as e:
+                    print(f"Error actualizando registro existente {enlace}: {e}")
+            continue
+
+        # Registro nuevo
         embedding = encoder.encode(texto_completo).tolist()
 
         elemento = {
@@ -161,8 +214,9 @@ def sincronizar_licitaciones_pscp():
             "fecha_fin": fecha_fin_str,
             "lugar_ejecucion": lugar_ejecucion,
             "cpv": cpv,
-            "es_novedad": es_nuevo,
-            "es_actualizada": es_actualizado,
+            "tipo_contrato": tipo_contrato,
+            "es_novedad": True,
+            "es_actualizada": False,
             "fuente": "PSCP Catalunya"
         }
 
@@ -190,7 +244,7 @@ def sincronizar_licitaciones_pscp():
     except Exception as e:
         print(f"Error en la limpieza de caducadas: {e}")
 
-    # 4. Inserción optimizada con lotes ultra pequeños (5 registros) y reintentos para evitar Timeouts
+    # 4. Inserción optimizada con lotes pequeños y reintentos
     if licitaciones_validas:
         total_a_subir = len(licitaciones_validas)
         print(f"Subiendo un total de {total_a_subir} licitaciones a Supabase...")
@@ -217,13 +271,10 @@ def sincronizar_licitaciones_pscp():
                         time.sleep(2 * intento)
                     else:
                         print(f"❌ Error definitivo al subir lote PSCP {num_lote}.")
-            
-            if not exito:
-                pass
                 
         print(f"Sincronización completada con éxito. Se han subido/actualizado {subidas_exitosas} de {total_a_subir} licitaciones.")
     else:
-        print("No hay licitaciones para procesar en este rango.")
+        print("No hay licitaciones nuevas para procesar en este rango.")
 
 if __name__ == "__main__":
     sincronizar_licitaciones_pscp()
