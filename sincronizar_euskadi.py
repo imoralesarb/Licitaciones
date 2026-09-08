@@ -79,15 +79,38 @@ def sincronizar_licitaciones_euskadi():
 
     print(f"Descargados {len(results)} registros totales de la API de Euskadi.\n")
 
-    # 1. Resetear flags de novedades anteriores de forma optimizada
+    # 1. Resetear flags de novedades anteriores para la fuente Euskadi
     print("Reseteando flags de novedades anteriores...")
     try:
-        # En lugar de usar ilike con comodín al inicio (%Euskadi%), actualizamos directamente 
-        # filtrando por los que tengan es_novedad = True para evitar timeouts pesados.
-        supabase.table("licitaciones").update({
-            "es_novedad": False,
-            "es_actualizada": False
-        }).eq("es_novedad", True).execute()
+        while True:
+            res_antiguos = supabase.table("licitaciones").select("id").ilike("fuente", "%Euskadi%").eq("es_novedad", True).limit(200).execute()
+            if not res_antiguos.data:
+                break
+            ids_antiguos = [item["id"] for item in res_antiguos.data]
+            
+            for i in range(0, len(ids_antiguos), 50):
+                lote_ids = ids_antiguos[i:i+50]
+                supabase.table("licitaciones").update({
+                    "es_novedad": False,
+                    "es_actualizada": False
+                }).in_("id", lote_ids).execute()
+        print("Flags reseteados con éxito.")
+    except Exception as e:
+        print(f"Aviso al resetear flags: {e}")
+
+    try:
+        while True:
+            res_antiguos = supabase.table("licitaciones").select("id").ilike("fuente", "%Euskadi%").eq("es_actualizada", True).limit(200).execute()
+            if not res_antiguos.data:
+                break
+            ids_antiguos = [item["id"] for item in res_antiguos.data]
+            
+            for i in range(0, len(ids_antiguos), 50):
+                lote_ids = ids_antiguos[i:i+50]
+                supabase.table("licitaciones").update({
+                    "es_novedad": False,
+                    "es_actualizada": False
+                }).in_("id", lote_ids).execute()
         print("Flags reseteados con éxito.")
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
@@ -208,6 +231,7 @@ def sincronizar_licitaciones_euskadi():
         # Comprobar si ya existía en la base de datos (por enlace o por la tupla título/órgano)
         registro_existente = mapa_enlaces.get(enlace)
         if not registro_existente and clave_duplicado in registros_existentes:
+            # Buscar en mapa_enlaces el registro que coincida con la clave duplicada si el enlace no matcheaba directamente
             for item_b in mapa_enlaces.values():
                 t_b = str(item_b.get("titulo", "")).strip().lower()
                 o_b = normalizar_organo(item_b.get("organo", ""))
@@ -232,7 +256,7 @@ def sincronizar_licitaciones_euskadi():
             except Exception as e:
                 print(f"Error actualizando fuente para el registro existente {registro_existente.get('id')}: {e}")
             
-            continue  
+            continue  # No se vuelve a meter ni modifica nada más de este registro
         else:
             fuente_final = "Euskadi"
             es_nuevo = True
@@ -259,7 +283,7 @@ def sincronizar_licitaciones_euskadi():
 
         licitaciones_validas.append(elemento)
 
-    # 3. Limpieza automática de caducadas por lotes (filtrando de forma segura)
+    # 3. Limpieza automática de caducadas por lotes
     try:
         todos_db = supabase.table("licitaciones").select("id, enlace, fecha_fin").ilike("fuente", "%Euskadi%").execute()
         ids_a_borrar = []
