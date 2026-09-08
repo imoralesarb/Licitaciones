@@ -83,7 +83,7 @@ def sincronizar_licitaciones_euskadi():
     print("Reseteando flags de novedades anteriores...")
     try:
         while True:
-            res_antiguos = supabase.table("licitaciones").select("id").eq("fuente", "Euskadi").eq("es_novedad", True).limit(200).execute()
+            res_antiguos = supabase.table("licitaciones").select("id").ilike("fuente", "%Euskadi%").eq("es_novedad", True).limit(200).execute()
             if not res_antiguos.data:
                 break
             ids_antiguos = [item["id"] for item in res_antiguos.data]
@@ -98,20 +98,24 @@ def sincronizar_licitaciones_euskadi():
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
 
-    # 2. Cargar registros existentes en Supabase para validar duplicados y actualizaciones
+    # 2. Cargar registros existentes en Supabase para validar duplicados y mapear fuentes
     try:
-        existentes_resp = supabase.table("licitaciones").select("*").eq("fuente", "Euskadi").execute()
-        registros_db = {item["enlace"]: item for item in existentes_resp.data if "enlace" in item}
+        existentes_resp = supabase.table("licitaciones").select("id, enlace, titulo, organo, fuente").execute()
         
-        mapa_enlaces = {item["enlace"] for item in existentes_resp.data if "enlace" in item}
+        mapa_enlaces = {}
         registros_existentes = set()
+        
         for item in existentes_resp.data:
+            enlace_item = item.get("enlace")
+            if enlace_item:
+                mapa_enlaces[enlace_item] = item
+
             t = str(item.get("titulo", "")).strip().lower()
             o_base = normalizar_organo(item.get("organo", ""))
             if t or o_base:
                 registros_existentes.add((t, o_base))
 
-        print(f"Registros cargados desde Supabase para validación: {len(registros_existentes)}")
+        print(f"Registros cargados desde Supabase para validación: {len(existentes_resp.data)}")
     except Exception as e:
         print(f"Error conectando con Supabase para lectura: {e}")
         return
@@ -119,27 +123,30 @@ def sincronizar_licitaciones_euskadi():
     licitaciones_validas = []
     filtrados_caducados = 0
     filtrados_duplicados = 0
+    registros_actualizados_count = 0
     enlaces_ya_procesados_en_sesion = set()
     claves_sesion = set()
 
     for fecha_ev, aviso in results:
-        enlace = aviso.get("urlEs", "")
-        codigo_item = aviso.get("record", "")
+        enlace = aviso.get("urlEs") or aviso.get("mainEntityOfPage", "")
+        codigo_item = aviso.get("record", "") or aviso.get("id", "")
         if not enlace:
             enlace = f"https://www.contratacion.euskadi.eus/webkpe00-kpeperfi/es/contenidos/anuncio_contratacion/{codigo_item}/es_doc/index.html"
 
         titulo_str = str(
+            aviso.get("object") or
             aviso.get("nameEs") or
             aviso.get("nameEu") or
             "Sin título"
         ).strip()
 
-        organo_raw = str(aviso.get("adjudicatorEs", "No especificado")).strip()
-        organo_str = organo_raw
-        organo_base = normalizar_organo(organo_raw)
+        organo_raw = str(aviso.get("adjudicatorEs") or aviso.get("socialReason") or "No especificado").strip()
+        importe = float(aviso.get("budgetWithoutVAT") or aviso.get("awardAmountWithoutVAT") or 0.0)
+        tipo_contrato = "No especificado"
+        cpv = "No especificado"
 
         fecha_fin_str = "No especificada"
-        deadline_raw = aviso.get("endDate")
+        deadline_raw = aviso.get("endDate") or aviso.get("contractEndDate")
         if deadline_raw:
             fecha_fin_str = deadline_raw[:10]
             try:
@@ -150,24 +157,35 @@ def sincronizar_licitaciones_euskadi():
             except ValueError:
                 pass
 
-        fecha_pub = str(aviso.get("startDate", ""))[:10]
+        fecha_pub = str(aviso.get("startDate") or aviso.get("awardDate") or "")[:10]
 
-        # Extracción de importe y CPV desde el detalle
-        importe = 0.0
-        cpv = "No especificado"
-
+        # Extracción de importe, CPV y tipo de contrato desde el detalle
         if codigo_item:
             try:
                 url_detalle = f"https://api.euskadi.eus/procurements/contracting-notices/{codigo_item}"
                 resp_detalle = requests.get(url_detalle, headers={"Accept": "application/json"}, timeout=5)
                 if resp_detalle.status_code == 200:
                     det_data = resp_detalle.json()
-                    importe = float(
-                        det_data.get("budgetWithoutVAT") or
-                        det_data.get("estimatedValue") or
-                        det_data.get("budgetWithVAT") or
-                        det_data.get("budget") or 0.0
-                    )
+
+                    if det_data.get("object"):
+                        titulo_str = str(det_data.get("object")).strip()
+
+                    auth_name = det_data.get("contractingAuthority", {}).get("name")
+                    org_name = det_data.get("entity", {}).get("org", {}).get("name")
+                    if auth_name:
+                        organo_raw = auth_name
+                    elif org_name:
+                        organo_raw = org_name
+
+                    if det_data.get("budgetWithoutVAT") is not None:
+                        importe = float(det_data.get("budgetWithoutVAT"))
+
+                    # Obtener tipo de contrato
+                    ct_obj = det_data.get("contractType")
+                    if isinstance(ct_obj, dict):
+                        tipo_contrato = ct_obj.get("name", "No especificado")
+                    elif isinstance(ct_obj, str):
+                        tipo_contrato = ct_obj
 
                     cpv_raw = det_data.get("CPV") or det_data.get("contractingAuthority", {}).get("CPV", "No especificado")
                     if isinstance(cpv_raw, list):
@@ -180,12 +198,12 @@ def sincronizar_licitaciones_euskadi():
             except Exception as ex:
                 print(f"Error consultando detalle para {codigo_item}: {ex}")
 
+        organo_str = organo_raw
+        organo_base = normalizar_organo(organo_raw)
         lugar_ejecucion = procesar_lugar_euskadi("País Vasco")
 
         clave_duplicado = (titulo_str.lower(), organo_base)
-        if (enlace in mapa_enlaces or
-            enlace in enlaces_ya_procesados_en_sesion or
-            clave_duplicado in registros_existentes or
+        if (enlace in enlaces_ya_procesados_en_sesion or
             clave_duplicado in claves_sesion):
             filtrados_duplicados += 1
             continue
@@ -193,17 +211,40 @@ def sincronizar_licitaciones_euskadi():
         enlaces_ya_procesados_en_sesion.add(enlace)
         claves_sesion.add(clave_duplicado)
 
-        es_nuevo = enlace not in registros_db
-        es_actualizado = False
+        # Comprobar si ya existía en la base de datos (por enlace o por la tupla título/órgano)
+        registro_existente = mapa_enlaces.get(enlace)
+        if not registro_existente and clave_duplicado in registros_existentes:
+            # Buscar en mapa_enlaces el registro que coincida con la clave duplicada si el enlace no matcheaba directamente
+            for item_b in mapa_enlaces.values():
+                t_b = str(item_b.get("titulo", "")).strip().lower()
+                o_b = normalizar_organo(item_b.get("organo", ""))
+                if (t_b, o_b) == clave_duplicado:
+                    registro_existente = item_b
+                    break
 
-        if not es_nuevo:
-            reg_antiguo = registros_db[enlace]
-            if (reg_antiguo.get("titulo") != titulo_str or 
-                reg_antiguo.get("importe") != importe or 
-                reg_antiguo.get("fecha_fin") != fecha_fin_str):
-                es_actualizado = True
+        # Regla de fuentes y novedad solicitada
+        if registro_existente:
+            fuente_actual = str(registro_existente.get("fuente", ""))
+            if "euskadi" not in fuente_actual.lower():
+                fuente_final = f"{fuente_actual}, euskadi" if fuente_actual else "euskadi"
+            else:
+                fuente_final = fuente_actual
+            
+            # Si ya existía, actualizamos únicamente el campo fuente en la BDD para ese ID y no tocamos nada más
+            try:
+                supabase.table("licitaciones").update({
+                    "fuente": fuente_final
+                }).eq("id", registro_existente["id"]).execute()
+                registros_actualizados_count += 1
+            except Exception as e:
+                print(f"Error actualizando fuente para el registro existente {registro_existente.get('id')}: {e}")
+            
+            continue  # No se vuelve a meter ni modifica nada más de este registro
+        else:
+            fuente_final = "Euskadi"
+            es_nuevo = True
 
-        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo_str}. CPV: {cpv}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
+        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo_str}. CPV: {cpv}. Tipo de contrato: {tipo_contrato}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
         embedding = encoder.encode(texto_completo).tolist()
 
         elemento = {
@@ -217,16 +258,17 @@ def sincronizar_licitaciones_euskadi():
             "fecha_fin": fecha_fin_str,
             "lugar_ejecucion": lugar_ejecucion,
             "cpv": cpv,
+            "tipo_contrato": tipo_contrato,
             "es_novedad": es_nuevo,
-            "es_actualizada": es_actualizado,
-            "fuente": "Euskadi"
+            "es_actualizada": False,
+            "fuente": fuente_final
         }
 
         licitaciones_validas.append(elemento)
 
     # 3. Limpieza automática de caducadas por lotes
     try:
-        todos_db = supabase.table("licitaciones").select("id, enlace, fecha_fin").eq("fuente", "Euskadi").execute()
+        todos_db = supabase.table("licitaciones").select("id, enlace, fecha_fin").ilike("fuente", "%Euskadi%").execute()
         ids_a_borrar = []
         for item in todos_db.data:
             f_fin = item.get("fecha_fin")
@@ -248,12 +290,12 @@ def sincronizar_licitaciones_euskadi():
 
     print(f"\n--- ESTADÍSTICAS EUSKADI ---")
     print(f"Descartados por fecha caducada: {filtrados_caducados}")
-    print(f"Duplicados evitados (con órgano normalizado): {filtrados_duplicados}")
-    print(f"Licitaciones válidas listas para insertar: {len(licitaciones_validas)}\n")
+    print(f"Duplicados evitados / registros existentes actualizados en campo 'fuente': {registros_actualizados_count}")
+    print(f"Nuevas licitaciones válidas listas para insertar: {len(licitaciones_validas)}\n")
 
-    # 4. Inserción optimizada por lotes con reintentos
+    # 4. Inserción optimizada por lotes con reintentos para registros nuevos
     if licitaciones_validas:
-        print("Subiendo licitaciones de Euskadi a Supabase...")
+        print("Subiendo nuevas licitaciones de Euskadi a Supabase...")
         tamano_lote = 15
         max_intentos = 3
         subidas_exitosas = 0
@@ -278,7 +320,7 @@ def sincronizar_licitaciones_euskadi():
                     else:
                         print(f"Error definitivo al subir lote Euskadi {num_lote}.")
 
-        print(f"¡Sincronización de Euskadi completada con éxito! Se han subido/actualizado {subidas_exitosas} de {total_a_subir} licitaciones.")
+        print(f"¡Sincronización de Euskadi completada con éxito! Se han subido {subidas_exitosas} de {total_a_subir} licitaciones nuevas.")
     else:
         print("No hay nuevas licitaciones de Euskadi para insertar.")
 
