@@ -109,6 +109,22 @@ def sincronizar_licitaciones_pscp():
         print("Flags reseteados con éxito.")
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
+    try:
+        while True:
+            res_antiguos = supabase.table("licitaciones").select("id").eq("fuente", "PSCP Catalunya").eq("es_actualizada", True).limit(200).execute()
+            if not res_antiguos.data:
+                break
+            ids_antiguos = [item["id"] for item in res_antiguos.data]
+            
+            for i in range(0, len(ids_antiguos), 50):
+                lote_ids = ids_antiguos[i:i+50]
+                supabase.table("licitaciones").update({
+                    "es_novedad": False,
+                    "es_actualizada": False
+                }).in_("id", lote_ids).execute()
+        print("Flags reseteados con éxito.")
+    except Exception as e:
+        print(f"Aviso al resetear flags: {e}")
 
     # 2. Cargar todos los registros existentes en Supabase para validar duplicados y actualizar fuentes globales
     try:
