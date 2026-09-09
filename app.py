@@ -467,7 +467,8 @@ with col_resultados:
         col_res_chk, col_res_texto, col_res_slider = st.columns([2.5, 2, 4])
 
         with col_res_chk:
-            mostrar_todos = st.checkbox(value=True,
+            mostrar_todos = st.checkbox(
+                value=True,
                 "Mostrar TODOS los resultados",
                 key="mostrar_todos"
             )
