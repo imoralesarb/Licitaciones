@@ -481,7 +481,7 @@ with col_resultados:
         with col_res_texto:
             st.markdown(
                 '<div style="padding-top: 8px;">'
-                '<Número de resultados:'
+                'Número de resultados:'
                 '</div>',
                 unsafe_allow_html=True
             )
