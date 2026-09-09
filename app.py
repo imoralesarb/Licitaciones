@@ -392,25 +392,21 @@ with col6:
         "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
     )
 with col7:
-    mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        f_inicio = st.date_input("📅 Desde (Publicación)", value=date(2026, 1, 1), key="f_inicio")
+    with col_f2:
+        f_fin = st.date_input("Hasta (Publicación)", value=date(2026, 12, 31), key="f_fin")
 
-st.markdown("##### 📅 Rango de fecha de publicación en plataforma")
-col_f1, col_f2 = st.columns(2)
-with col_f1:
-    f_inicio = st.date_input("Desde", value=date(2026, 1, 1), key="f_inicio")
-with col_f2:
-    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin")
-
-st.markdown("##### ⏳ Fecha fin de presentación de oferta")
-col_c1, _ = st.columns([1, 1])
+col_c1, col_res_q, col_res_chk, col_res_slider = st.columns([2, 2, 2, 3])
 with col_c1:
     fecha_cierre_tope = st.date_input(
-        "Fecha tope mínima de fin de presentación", value=date(2026, 3, 1), key="fecha_cierre_tope"
+        "⏳ Fecha fin de presentación (Mínima)", value=date(2026, 3, 1), key="fecha_cierre_tope"
     )
-
-col_res_label, col_res_slider = st.columns([2, 4])
-with col_res_label:
-    st.markdown("**¿Cuántos resultados quieres ver?**")
+with col_res_q:
+    st.write("¿Cuántos resultados quieres ver?")
+with col_res_chk:
+    mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
 with col_res_slider:
     limite_resultados = st.slider(
         "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados", label_visibility="collapsed"
