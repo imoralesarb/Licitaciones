@@ -375,6 +375,7 @@ with col_tipo:
     default=[], 
     key="filtro_tipo_contrato"
 )
+
 with col1:
     importe_min = st.number_input("Importe Mínimo (€)", value=0.0, key="importe_min")
 with col2:
@@ -388,24 +389,32 @@ with col3:
         key="filtro_ccaa"
     )
 
-# Campos de línea completa para lugar libre, sector CPV y código CPV
-filtro_lugar_libre = st.text_input(
-    "📍 Lugar de ejecución (Libre)",
-    placeholder="ej. San Sebastián",
-    key="filtro_lugar_libre",
-)
 
-lista_sectores = list(SECTORES_CPV.keys())
-filtro_cpv_sector = st.multiselect(
-    "📦 Sector CPV", 
-    [s for s in lista_sectores if "Todos" not in s], 
-    default=[], 
-    key="filtro_cpv_sector"
-)
+# Campos de lugar, sector y código CPV en una misma fila
+col_lugar, col_sector, col_cpv = st.columns([1, 1, 1])
 
-filtro_cpv_codigo = st.text_input(
-    "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
-)
+with col_lugar:
+    filtro_lugar_libre = st.text_input(
+        "📍 Lugar de ejecución (Libre)",
+        placeholder="ej. San Sebastián",
+        key="filtro_lugar_libre"
+    )
+
+with col_sector:
+    lista_sectores = list(SECTORES_CPV.keys())
+    filtro_cpv_sector = st.multiselect(
+        "📦 Sector CPV",
+        [s for s in lista_sectores if "Todos" not in s],
+        default=[],
+        key="filtro_cpv_sector"
+    )
+
+with col_cpv:
+    filtro_cpv_codigo = st.text_input(
+        "🔢 Código CPV",
+        placeholder="ej. 45210000",
+        key="filtro_cpv_codigo"
+    )
 
 # Fila inferior con fecha fin y rango de publicación alineados en el mismo renglón
 col_f_lbl, col_r_lbl, col_r1, col_r2 = st.columns([1.5, 1.2, 2, 2])
