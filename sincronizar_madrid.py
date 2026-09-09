@@ -176,10 +176,10 @@ def sincronizar_licitaciones_madrid():
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
 
-    # 2. Cargar registros existentes en Supabase para validar duplicados y actualizaciones
-    print("Cargando registros existentes desde Supabase para validación...")
+    # 2. Cargar TODOS los registros existentes en Supabase para validar duplicados y actualizar fuentes globales
+    print("Cargando registros existentes desde Supabase para validación global...")
     try:
-        existentes_resp = supabase.table("licitaciones").select("*").eq("fuente", "Comunidad de Madrid").execute()
+        existentes_resp = supabase.table("licitaciones").select("enlace, titulo, organo, fuente, tipo_contrato, fecha_fin, importe").execute()
         registros_db = {item["enlace"]: item for item in existentes_resp.data if "enlace" in item}
 
         registros_existentes = set()
@@ -189,15 +189,14 @@ def sincronizar_licitaciones_madrid():
             if t or o_base:
                 registros_existentes.add((t, o_base))
 
-        print(f"Registros cargados desde Supabase para validación: {len(registros_db)}")
+        print(f"Registros totales cargados desde Supabase: {len(registros_db)}")
     except Exception as e:
-        print(f"Error conectando con Supabase: {e}")
+        print(f"Error conectando con Supabase para lectura: {e}")
         return
 
     licitaciones_validas = []
     filtrados_caducados = 0
     enlaces_procesados_sesion = set()
-    claves_sesion = set()
 
     print(f"Procesando y filtrando entradas (del {fecha_inicio_rango} al {fecha_fin_rango})...")
     for entry in entries_totales:
@@ -291,40 +290,47 @@ def sincronizar_licitaciones_madrid():
         enlaces_procesados_sesion.add(enlace)
 
         clave_duplicado = (titulo_str.strip().lower(), organo_base)
-        
-        # Validación de duplicados / existencia previa y gestión de fuentes o tipo de contrato faltante
-        fuente_final = "Comunidad de Madrid"
+        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo}. Tipo de contrato: {tipo_contrato}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
+
+        # VALIDACIÓN DE REGISTRO EXISTENTE (Global)
         if enlace in registros_db:
             reg_antiguo = registros_db[enlace]
             fuente_actual = str(reg_antiguo.get("fuente", ""))
             tipo_actual = reg_antiguo.get("tipo_contrato", "")
             
-            if "comunidad de madrid" not in fuente_actual.lower():
-                fuente_final = f"{fuente_actual}, Comunidad de Madrid" if fuente_actual else "Comunidad de Madrid"
-            else:
-                fuente_final = fuente_actual
+            actualizar_datos = {}
+            
+            # Añadir fuente al final si no la tiene ya registrada
+            if "Comunidad de Madrid" not in fuente_actual:
+                nueva_fuente = f"{fuente_actual}, Comunidad de Madrid" if fuente_actual else "Comunidad de Madrid"
+                actualizar_datos["fuente"] = nueva_fuente
 
-            actualizar_datos = {"fuente": fuente_final}
+            # Añadir tipo de contrato si estaba vacío o no especificado
             if (not tipo_actual or tipo_actual == "No especificado") and tipo_contrato != "No especificado":
                 actualizar_datos["tipo_contrato"] = tipo_contrato
 
-            try:
-                supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
-                reg_antiguo.update(actualizar_datos)
-            except Exception as e:
-                print(f"Error actualizando registro existente Madrid {enlace}: {e}")
+            # Detectar si hay cambios importantes para marcar como actualizado
+            es_actualizado = (
+                reg_antiguo.get("titulo") != titulo_str.strip() or 
+                reg_antiguo.get("importe") != importe or 
+                reg_antiguo.get("fecha_fin") != fecha_fin_str
+            )
+            if es_actualizado:
+                actualizar_datos["es_actualizada"] = True
 
-            # Si ya existía, actualizamos sus datos adicionales en BD pero evitamos reinsertarlo como nuevo
+            if actualizar_datos:
+                try:
+                    supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
+                    reg_antiguo.update(actualizar_datos)
+                except Exception as e:
+                    print(f"Error actualizando registro existente Madrid {enlace}: {e}")
+            
+            # No lo reinsertamos porque ya existe en BD
             continue 
-        else:
-            fuente_final = "Comunidad de Madrid"
 
-        texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo}. Tipo de contrato: {tipo_contrato}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
-        
-        es_nuevo = enlace not in registros_db and clave_duplicado not in registros_existentes
-        es_actualizado = False
-
+        # Registro NUEVO
         embedding = encoder.encode(texto_completo).tolist()
+        es_nuevo = clave_duplicado not in registros_existentes
 
         elemento = {
             "titulo": titulo_str.strip(),
@@ -339,12 +345,11 @@ def sincronizar_licitaciones_madrid():
             "cpv": cpv_codigo,
             "tipo_contrato": tipo_contrato,
             "es_novedad": es_nuevo,
-            "es_actualizada": es_actualizado,
-            "fuente": fuente_final
+            "es_actualizada": False,
+            "fuente": "Comunidad de Madrid"
         }
 
         licitaciones_validas.append(elemento)
-
     # 3. Limpieza automática de caducadas por lotes
     try:
         todos_db = supabase.table("licitaciones").select("id, enlace, fecha_fin").eq("fuente", "Comunidad de Madrid").execute()
