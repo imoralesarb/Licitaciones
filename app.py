@@ -48,9 +48,9 @@ st.markdown(
             background-color: #f8f9fa;
             border: 1px solid #e0e0e0;
             border-radius: 10px;
-            padding: 16px 20px;
-            margin-top: 10px;
-            margin-bottom: 10px;
+            padding: 20px;
+            margin-top: 15px;
+            margin-bottom: 15px;
         }
         .alignment-fix {
             display: flex;
@@ -408,22 +408,32 @@ with col6:
         "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
     )
 with col7:
+    # Espacio vacío o reservado en la 4ª columna para mantener la fila simétrica (la fecha fin se pasa abajo)
+    st.write("")
+
+# Segunda fila de filtros que termina exactamente en código CPV y traslada las fechas abajo
+col_f_lbl, col_f1, col_f2, col_cierre = st.columns(4)
+with col_f_lbl:
     fecha_cierre_tope = st.date_input(
         "⏳ Fecha fin de presentación (Mínima)", value=date(2026, 3, 1), key="fecha_cierre_tope"
     )
 
-# Rango de publicación compartido en una sola línea compacta
-col_f_lbl, col_f1, col_f2 = st.columns([1.2, 2, 2])
-with col_f_lbl:
+col_r_lbl, col_r1, col_r2 = st.columns([1.2, 2, 2])
+with col_r_lbl:
     st.markdown('<div class="alignment-fix">📅 Rango publicación:</div>', unsafe_allow_html=True)
-with col_f1:
+with col_r1:
     f_inicio = st.date_input("Desde", value=date(2026, 1, 1), key="f_inicio", label_visibility="collapsed")
-with col_f2:
+with col_r2:
     f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
-# Sección de cantidad y opciones de resultados metidas dentro de un recuadro unificado
-st.markdown('<div class="results-container">', unsafe_allow_html=True)
-st.markdown("**¿Cuántos resultados quieres ver?**")
+# Sección de cantidad y opciones de resultados metidas dentro de un recuadro unificado con la pregunta en negrita
+st.markdown(
+    """
+    <div class="results-container">
+        <strong>¿Cuántos resultados quieres ver?</strong>
+    """,
+    unsafe_allow_html=True,
+)
 col_res_chk, col_res_slider = st.columns([2, 4])
 with col_res_chk:
     mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
