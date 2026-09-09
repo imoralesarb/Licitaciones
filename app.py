@@ -388,37 +388,31 @@ with col3:
         key="filtro_ccaa"
     )
 
-col4, col5, col6, col7 = st.columns(4)
-with col4:
-    filtro_lugar_libre = st.text_input(
-        "📍 Lugar de ejecución (Libre)",
-        placeholder="ej. San Sebastián",
-        key="filtro_lugar_libre",
-    )
-with col5:
-    lista_sectores = list(SECTORES_CPV.keys())
-    filtro_cpv_sector = st.multiselect(
-        "📦 Sector CPV", 
-        [s for s in lista_sectores if "Todos" not in s], 
-        default=[], 
-        key="filtro_cpv_sector"
-    )
-with col6:
-    filtro_cpv_codigo = st.text_input(
-        "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
-    )
-with col7:
-    # Espacio vacío o reservado en la 4ª columna para mantener la fila simétrica (la fecha fin se pasa abajo)
-    st.write("")
+# Campos de línea completa para lugar libre, sector CPV y código CPV
+filtro_lugar_libre = st.text_input(
+    "📍 Lugar de ejecución (Libre)",
+    placeholder="ej. San Sebastián",
+    key="filtro_lugar_libre",
+)
 
-# Segunda fila de filtros que termina exactamente en código CPV y traslada las fechas abajo
-col_f_lbl, col_f1, col_f2, col_cierre = st.columns(4)
+lista_sectores = list(SECTORES_CPV.keys())
+filtro_cpv_sector = st.multiselect(
+    "📦 Sector CPV", 
+    [s for s in lista_sectores if "Todos" not in s], 
+    default=[], 
+    key="filtro_cpv_sector"
+)
+
+filtro_cpv_codigo = st.text_input(
+    "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
+)
+
+# Fila inferior con fecha fin y rango de publicación alineados en el mismo renglón
+col_f_lbl, col_r_lbl, col_r1, col_r2 = st.columns([1.5, 1.2, 2, 2])
 with col_f_lbl:
     fecha_cierre_tope = st.date_input(
         "⏳ Fecha fin de presentación (Mínima)", value=date(2026, 3, 1), key="fecha_cierre_tope"
     )
-
-col_r_lbl, col_r1, col_r2 = st.columns([1.2, 2, 2])
 with col_r_lbl:
     st.markdown('<div class="alignment-fix">📅 Rango publicación:</div>', unsafe_allow_html=True)
 with col_r1:
@@ -426,7 +420,7 @@ with col_r1:
 with col_r2:
     f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
-# Sección de cantidad y opciones de resultados metidas dentro de un recuadro unificado con la pregunta en negrita
+# Sección de cantidad, pregunta y barra de resultados metidas dentro de un único recuadro unificado
 st.markdown(
     """
     <div class="results-container">
