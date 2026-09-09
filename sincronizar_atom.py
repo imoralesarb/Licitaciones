@@ -80,9 +80,65 @@ def crear_sesion_robusta():
     session.mount("http://", adapter)
     return session
 
+def normalizar_organo(texto):
+    if not texto:
+        return ""
+    texto = texto.lower().strip()
+    texto = re.sub(r'[áàäâ]', 'a', texto)
+    texto = re.sub(r'[éèëê]', 'e', texto)
+    texto = re.sub(r'[íìïî]', 'i', texto)
+    texto = re.sub(r'[óòöô]', 'o', texto)
+    texto = re.sub(r'[úùüû]', 'u', texto)
+    texto = re.sub(r'[^a-z0-9\s]', '', texto)
+    return re.sub(r'\s+', ' ', texto)
+
 def _texto(el, xpath, ns=NS):
     nodo = el.find(xpath, ns)
     return nodo.text.strip() if nodo is not None and nodo.text else None
+
+def traducir_tipo_contrato(codigo_raw):
+    """Traduce o mapea el código o texto del tipo de contrato al estándar."""
+    if not codigo_raw:
+        return "No especificado"
+    
+    limpio = str(codigo_raw).strip().lower()
+    
+    mapping_codigos = {
+        "1": "Suministros",
+        "2": "Servicios",
+        "3": "Obras",
+        "4": "Concesión de obras",
+        "5": "Gestión de servicios públicos",
+        "6": "Concesión de servicios",
+        "7": "Colaboración entre el sector público y el sector privado",
+        "8": "Administrativo especial",
+        "21": "Privado",
+        "patrimonial": "Patrimonial",
+        "otros": "Otros"
+    }
+    
+    if limpio in mapping_codigos:
+        return mapping_codigos[limpio]
+    
+    mapping_texto = {
+        "obres": "Obras",
+        "obras": "Obras",
+        "serveis": "Servicios",
+        "servicios": "Servicios",
+        "subministraments": "Suministros",
+        "suministros": "Suministros",
+        "concesión de obras públicas": "Concesión de obras públicas",
+        "concesión de obras": "Concesión de obras",
+        "gestión de servicios públicos": "Gestión de servicios públicos",
+        "concesión de servicios": "Concesión de servicios",
+        "colaboración entre el sector público y el sector privado": "Colaboración entre el sector público y el sector privado",
+        "administrativo especial": "Administrativo especial",
+        "privado": "Privado",
+        "patrimonial": "Patrimonial",
+        "otros": "Otros"
+    }
+    
+    return mapping_texto.get(limpio, str(codigo_raw).capitalize())
 
 def limpiar_licitaciones_caducadas():
     hoy_str = date.today().strftime("%Y-%m-%d")
@@ -115,11 +171,10 @@ def resetear_etiquetas_por_fuente(nombre_feed):
         print(f"⚠️ Aviso al resetear estados para {nombre_feed}: {e}")
 
 # ============================================================
-# 3. PROCESAMIENTO DEL FEED CON DETECCIÓN POR NOMBRE DE URL
+# 3. PROCESAMIENTO Y SINCRONIZACIÓN DE FEEDS PLACSP
 # ============================================================
 
-def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
-    licitaciones_por_expediente = {}
+def procesar_y_sincronizar_feed(nombre_feed, url_inicial):
     hoy = date.today()
     url_actual = url_inicial
     paginas_procesadas = 0
@@ -127,29 +182,36 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     estados_cerrados = ["EV", "ADJ", "RES", "ANUL", "FOR", "AS", "RE", "CAN"]
+    licitaciones_por_expediente = {}
+
+    print(f"\n🌐 PROCESANDO FEED: {nombre_feed}")
+    resetear_etiquetas_por_fuente(nombre_feed)
 
     while url_actual and paginas_procesadas < MAX_PAGINAS:
         paginas_procesadas += 1
-
-        print(f"📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
+        print(f"  📄 PÁGINA {paginas_procesadas}/{MAX_PAGINAS} - {url_actual}")
 
         try:
             resp = sesion.get(url_actual, headers=headers, timeout=30)
             if resp.status_code != 200:
+                print(f"  ⚠️ Error HTTP {resp.status_code} al descargar la página.")
                 break
 
             parser = ET.XMLParser(recover=True)
             root = ET.fromstring(resp.content, parser=parser)
             entries = root.findall("atom:entry", NS) or root.findall(".//{http://www.w3.org/2005/Atom}entry")
             if not entries:
+                print("  ℹ️ No se encontraron más entradas en esta página.")
                 break
 
-            for index, entry in enumerate(entries):
+            for entry in entries:
                 enlace_el = entry.find("atom:link", NS)
                 enlace = enlace_el.get("href") if enlace_el is not None else ""
                 if enlace and "contrataciondelestado.es" in enlace:
                     enlace = enlace.replace("contrataciondelestado.es", "contrataciondelsectorpublico.gob.es")
                 enlace = enlace.strip()
+                if not enlace:
+                    continue
 
                 codigo_estado = "PUB"
                 try:
@@ -181,11 +243,10 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     try:
                         fecha_fin = datetime.strptime(fecha_fin_str, "%Y-%m-%d").date()
                         if fecha_fin < hoy:
-                            print(f"🗑️ Licitación caducada detectada: {enlace}")
                             try:
                                 supabase.table("licitaciones").delete().eq("enlace", enlace).execute()
-                            except Exception as e:
-                                print(f"⚠️ No se pudo eliminar la licitación caducada: {e}")
+                            except Exception:
+                                pass
                             continue
                     except Exception:
                         pass
@@ -212,6 +273,13 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                             lugar_ejecucion = MAPEO_NUTS.get(lugar_el.text.strip(), lugar_el.text.strip())
                 except Exception:
                     pass
+
+                # Tipo de contrato
+                type_code_el = entry.find(".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:TypeCode", NS)
+                if type_code_el is None:
+                    type_code_el = entry.find(".//cbc:TypeCode", NS)
+                tipo_contrato_raw = type_code_el.text.strip() if type_code_el is not None and type_code_el.text else "No especificado"
+                tipo_contrato = traducir_tipo_contrato(tipo_contrato_raw)
 
                 importe = 0.0
                 try:
@@ -240,7 +308,7 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                         break
 
                 descripcion = _texto(entry, ".//cac-place-ext:ContractFolderStatus/cac:ProcurementProject/cbc:Name", NS) or _texto(entry, ".//cac:ProcurementProject/cbc:Description", NS) or ""
-                texto_evaluacion = f"passage: Título: {titulo}. Objeto: {descripcion}. Órgano: {organo}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
+                texto_evaluacion = f"passage: Título: {titulo}. Objeto: {descripcion}. Órgano: {organo}. Tipo de contrato: {tipo_contrato}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
 
                 licitacion_data = {
                     "enlace": enlace,
@@ -251,6 +319,7 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
                     "cpv": cpv_codigo,
                     "lugar_ejecucion": lugar_ejecucion,
                     "fecha_fin": fecha_fin_str,
+                    "tipo_contrato": tipo_contrato,
                     "texto_completo": texto_evaluacion,
                     "fuente": nombre_feed,
                     "_atom_updated": txt_updated or txt_fecha,
@@ -264,82 +333,144 @@ def procesar_feed_atom_en_linea(nombre_feed, url_inicial):
             if url_actual and "contrataciondelestado.es" in url_actual:
                 url_actual = url_actual.replace("contrataciondelestado.es", "contrataciondelsectorpublico.gob.es")
 
-            time.sleep(1)
+            time.sleep(0.5)
         except Exception as e:
             print(f"❌ Error de red: {e}. Reintentando...")
-            time.sleep(10)
+            time.sleep(5)
             continue
 
-    for item in licitaciones_por_expediente.values():
+    entries_totales = list(licitaciones_por_expediente.values())
+    for item in entries_totales:
         item.pop("_atom_updated", None)
 
-    return list(licitaciones_por_expediente.values())
+    # ============================================================
+    # 4. CARGA GLOBAL Y VALIDACIÓN EN SUPABASE
+    # ============================================================
+    print("Cargando registros existentes desde Supabase para validación global...")
+    try:
+        existentes_resp = supabase.table("licitaciones").select("enlace, titulo, organo, fuente, tipo_contrato, fecha_fin, importe").execute()
+        registros_db = {item["enlace"]: item for item in existentes_resp.data if "enlace" in item}
 
-# ============================================================
-# 4. ORQUESTACIÓN Y PROCESAMIENTO
-# ============================================================
+        registros_existentes = set()
+        for item in existentes_resp.data:
+            t = str(item.get("titulo", "")).strip().lower()
+            o_base = normalizar_organo(item.get("organo", ""))
+            if t or o_base:
+                registros_existentes.add((t, o_base))
 
-limpiar_licitaciones_caducadas()
+        print(f"Registros totales cargados desde Supabase: {len(registros_db)}")
+    except Exception as e:
+        print(f"Error conectando con Supabase para lectura: {e}")
+        return
 
-todas_licitaciones = []
-for feed in FEEDS_ATOM:
-    print(f"🌐 PROCESANDO FEED: {feed['nombre']}")
-    # Resetear solo las etiquetas de este feed específico mediante paginación segura
-    resetear_etiquetas_por_fuente(feed["nombre"])
-    
-    lics = procesar_feed_atom_en_linea(feed["nombre"], feed["url"])
-    todas_licitaciones.extend(lics)
+    licitaciones_validas = []
+    enlaces_procesados_sesion = set()
 
-print("🔍 Consultando base de datos existente para marcar novedades y actualizaciones...")
-existentes_resp = supabase.table("licitaciones").select("enlace, fecha").execute()
-mapa_existentes = {item["enlace"]: item["fecha"] for item in existentes_resp.data}
+    print("Procesando duplicados y preparando upsert...")
+    for entry in entries_totales:
+        enlace = entry["enlace"]
+        if enlace in enlaces_procesados_sesion:
+            continue
+        enlaces_procesados_sesion.add(enlace)
 
-for lic in todas_licitaciones:
-    enlace = lic["enlace"]
-    if enlace not in mapa_existentes:
-        lic["es_novedad"] = True
-        lic["es_actualizada"] = False
+        titulo_str = entry["titulo"]
+        organo = entry["organo"]
+        organo_base = normalizar_organo(organo)
+        tipo_contrato = entry["tipo_contrato"]
+        importe = entry["importe"]
+        fecha_fin_str = entry["fecha_fin"]
+        
+        clave_duplicado = (titulo_str.strip().lower(), organo_base)
+
+        # VALIDACIÓN DE REGISTRO EXISTENTE (Global)
+        if enlace in registros_db:
+            reg_antiguo = registros_db[enlace]
+            fuente_actual = str(reg_antiguo.get("fuente", ""))
+            tipo_actual = reg_antiguo.get("tipo_contrato", "")
+            
+            actualizar_datos = {}
+            
+            # Añadir fuente al final separada por coma si no la tiene registrada
+            if nombre_feed not in fuente_actual:
+                nueva_fuente = f"{fuente_actual}, {nombre_feed}" if fuente_actual else nombre_feed
+                actualizar_datos["fuente"] = nueva_fuente
+
+            # Añadir tipo de contrato si estaba vacío o no especificado
+            if (not tipo_actual or tipo_actual == "No especificado") and tipo_contrato != "No especificado":
+                actualizar_datos["tipo_contrato"] = tipo_contrato
+
+            # Detectar cambios importantes para marcar como actualizado
+            es_actualizado = (
+                reg_antiguo.get("titulo") != titulo_str.strip() or 
+                reg_antiguo.get("importe") != importe or 
+                reg_antiguo.get("fecha_fin") != fecha_fin_str
+            )
+            if es_actualizado:
+                actualizar_datos["es_actualizada"] = True
+
+            if actualizar_datos:
+                try:
+                    supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
+                    reg_antiguo.update(actualizar_datos)
+                except Exception as e:
+                    print(f"Error actualizando registro existente {enlace}: {e}")
+            
+            continue 
+
+        # Registro NUEVO
+        embedding = encoder.encode(entry["texto_completo"]).tolist()
+        es_nuevo = clave_duplicado not in registros_existentes
+
+        entry["embedding"] = embedding
+        entry["es_novedad"] = es_nuevo
+        entry["es_actualizada"] = False
+        entry["fuente"] = nombre_feed
+
+        licitaciones_validas.append(entry)
+
+    # ============================================================
+    # 5. INSERCIÓN OPTIMIZADA POR LOTES
+    # ============================================================
+    if licitaciones_validas:
+        total_a_subir = len(licitaciones_validas)
+        print(f"Subiendo un total de {total_a_subir} licitaciones nuevas a Supabase...")
+        
+        tamano_lote = 5
+        subidas_exitosas = 0
+        max_intentos = 3
+        
+        for i in range(0, total_a_subir, tamano_lote):
+            lote = licitaciones_validas[i:i + tamano_lote]
+            num_lote = i // tamano_lote + 1
+            exito = False
+            
+            for intento in range(1, max_intentos + 1):
+                try:
+                    supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
+                    subidas_exitosas += len(lote)
+                    print(f"Progreso ({nombre_feed}): {subidas_exitosas}/{total_a_subir} procesadas...")
+                    exito = True
+                    break
+                except Exception as e:
+                    print(f"⚠️ Intento {intento}/{max_intentos} fallido para lote {num_lote}: {e}")
+                    if intento < max_intentos:
+                        time.sleep(2 * intento)
+                    else:
+                        print(f"❌ Error definitivo al subir lote {num_lote}.")
+            
+            if not exito:
+                pass
+                
+        print(f"✅ Sincronización para '{nombre_feed}' completada. Subidas/actualizadas: {subidas_exitosas}/{total_a_subir}.")
     else:
-        lic["es_novedad"] = False
-        if lic["fecha"] > mapa_existentes[enlace]:
-            lic["es_actualizada"] = True
-        else:
-            lic["es_actualizada"] = False
+        print(f"No hay nuevas licitaciones para insertar en {nombre_feed}.")
 
 # ============================================================
-# 5. SUBIDA A SUPABASE
+# 6. ORQUESTACIÓN PRINCIPAL
 # ============================================================
 
-if todas_licitaciones:
-    print("🚀 Generando embeddings y subiendo a Supabase...")
-    for lic in todas_licitaciones:
-        lic["embedding"] = encoder.encode(lic["texto_completo"]).tolist()
-
-    tamano_lote = 5
-    subidas_exitosas = 0
-    total_a_subir = len(todas_licitaciones)
-    max_intentos = 3
-
-    for i in range(0, total_a_subir, tamano_lote):
-        lote = todas_licitaciones[i:i + tamano_lote]
-        num_lote = i // tamano_lote + 1
-        exito = False
-
-        for intento in range(1, max_intentos + 1):
-            try:
-                supabase.table("licitaciones").upsert(lote, on_conflict="enlace").execute()
-                subidas_exitosas += len(lote)
-                print(f"  -> Lote PLACSP {num_lote} procesado ({subidas_exitosas}/{total_a_subir})...")
-                exito = True
-                break
-            except Exception as e:
-                print(f"⚠️ Intento {intento}/{max_intentos} fallido para lote PLACSP {num_lote}: {e}")
-                if intento < max_intentos:
-                    time.sleep(2 * intento)
-
-        if not exito:
-            pass
-
-    print("✅ ¡Carga, control de paginación y reseteo completados con éxito!")
-else:
-    print("ℹ️ No hay licitaciones nuevas que procesar en esta ejecución.")
+if __name__ == "__main__":
+    limpiar_licitaciones_caducadas()
+    
+    for feed in FEEDS_ATOM:
+        procesar_y_sincronizar_feed(feed["nombre"], feed["url"])
