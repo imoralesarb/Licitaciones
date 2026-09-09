@@ -421,21 +421,30 @@ with col_r2:
     f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
 # Sección de cantidad, pregunta y barra de resultados metidas dentro de un único recuadro unificado
-st.markdown(
-    """
-    <div class="results-container">
-        <strong>¿Cuántos resultados quieres ver?</strong>
-    """,
-    unsafe_allow_html=True,
-)
-col_res_chk, col_res_slider = st.columns([2, 4])
-with col_res_chk:
-    mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
-with col_res_slider:
-    limite_resultados = st.slider(
-        "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados", label_visibility="collapsed"
+# Sección de cantidad de resultados
+with st.container(border=True):
+    st.markdown(
+        "<strong>¿Cuántos resultados quieres ver?</strong>",
+        unsafe_allow_html=True
     )
-st.markdown('</div>', unsafe_allow_html=True)
+
+    col_res_chk, col_res_slider = st.columns([2, 4])
+
+    with col_res_chk:
+        mostrar_todos = st.checkbox(
+            "Mostrar TODOS los resultados",
+            key="mostrar_todos"
+        )
+
+    with col_res_slider:
+        limite_resultados = st.slider(
+            "Resultados",
+            min_value=1,
+            max_value=500,
+            value=10,
+            key="limite_resultados",
+            label_visibility="collapsed"
+        )
 
 st.write("")
 
