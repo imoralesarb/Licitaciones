@@ -42,8 +42,7 @@ def procesar_lugar_navarra(lugar_raw):
 
 def sincronizar_licitaciones_navarra():
     hoy_date = datetime.now().date()
-    ayer_date = hoy_date - timedelta(days=1)
-
+    
     resource_id = "dda1af7c-0dcd-4992-9852-ded6b1e7625d"
     url_api = f"https://datosabiertos.navarra.es/es/api/3/action/datastore_search?resource_id={resource_id}&limit=1000"
     headers = {
@@ -65,61 +64,21 @@ def sincronizar_licitaciones_navarra():
 
     print(f"Total registros obtenidos de la API Navarra: {len(results)}")
 
-    # 1. Resetear flags de novedades anteriores
-    print("Reseteando flags de novedades anteriores...")
+    # 1. Resetear flags de novedades anteriores de forma directa (requiere índice)
+    print("Reseteando flags de novedades y actualizaciones anteriores...")
     try:
-        while True:
-            res_antiguos = (
-                supabase.table("licitaciones")
-                .select("id")
-                .eq("fuente", "Contratación Navarra")
-                .eq("es_novedad", True)
-                .limit(200)
-                .execute()
-            )
-            if not res_antiguos.data:
-                break
-            ids_antiguos = [item["id"] for item in res_antiguos.data]
-
-            for i in range(0, len(ids_antiguos), 50):
-                lote_ids = ids_antiguos[i : i + 50]
-                supabase.table("licitaciones").update(
-                    {"es_novedad": False, "es_actualizada": False}
-                ).in_("id", lote_ids).execute()
+        supabase.table("licitaciones").update(
+            {"es_novedad": False, "es_actualizada": False}
+        ).eq("fuente", "Contratación Navarra").execute()
         print("Flags reseteados con éxito.")
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
 
-    try:
-        while True:
-            res_antiguos = (
-                supabase.table("licitaciones")
-                .select("id")
-                .eq("fuente", "Contratación Navarra")
-                .eq("es_actualizada", True)
-                .limit(200)
-                .execute()
-            )
-            if not res_antiguos.data:
-                break
-            ids_antiguos = [item["id"] for item in res_antiguos.data]
-
-            for i in range(0, len(ids_antiguos), 50):
-                lote_ids = ids_antiguos[i : i + 50]
-                supabase.table("licitaciones").update(
-                    {"es_novedad": False, "es_actualizada": False}
-                ).in_("id", lote_ids).execute()
-        print("Flags reseteados con éxito.")
-    except Exception as e:
-        print(f"Aviso al resetear flags: {e}")
-
-    # 2. Cargar todos los registros existentes en Supabase para validar duplicados y actualizar fuentes globales
+    # 2. Cargar todos los registros existentes en Supabase para validar duplicados
     try:
         existentes_resp = (
             supabase.table("licitaciones")
-            .select(
-                "enlace, titulo, organo, fuente, tipo_contrato, fecha_fin, importe"
-            )
+            .select("enlace, titulo, organo, fuente, tipo_contrato, fecha_fin, importe")
             .execute()
         )
         registros_db = {
@@ -135,6 +94,19 @@ def sincronizar_licitaciones_navarra():
     enlaces_procesados_sesion = set()
 
     for i, aviso in enumerate(results, 1):
+        # Validar fecha de publicación (Filtro desde 1 de agosto de 2026 en adelante)
+        fecha_pub_str = aviso.get("FechaPublicacion", "")
+        if not fecha_pub_str:
+            continue
+            
+        try:
+            dt_pub = datetime.strptime(fecha_pub_str[:10], "%d/%m/%Y")
+            if dt_pub.date() < date(2026, 8, 1):
+                continue
+            fecha_pub = dt_pub.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
         ckan_id = aviso.get("_id", i)
         enlace = f"https://hacienda.navarra.es/sicpportal/mtoBuscadorAnuncios.aspx#{ckan_id}"
 
@@ -147,18 +119,7 @@ def sincronizar_licitaciones_navarra():
         entidad = str(aviso.get("Entidad") or "No especificada").strip()
         organo_completo = f"{entidad} - {organo}" if entidad else organo
 
-        # Al estar presente en la API, asumimos que sigue vigente/abierta
         fecha_fin_str = "No especificada"
-
-        fecha_pub_str = aviso.get("FechaPublicacion", "")
-        fecha_pub = hoy_date.strftime("%Y-%m-%d")
-        if fecha_pub_str:
-            try:
-                fecha_pub = datetime.strptime(
-                    fecha_pub_str[:10], "%d/%m/%Y"
-                ).strftime("%Y-%m-%d")
-            except ValueError:
-                pass
 
         importe_val = aviso.get("PrecioLicitacion") or aviso.get("ValorEstimado")
         try:
@@ -244,7 +205,7 @@ def sincronizar_licitaciones_navarra():
     # 4. Inserción optimizada con lotes pequeños y reintentos
     if licitaciones_validas:
         total_a_subir = len(licitaciones_validas)
-        print(f"Subiendo un total de {total_a_subir} licitaciones a Supabase...")
+        print(f"Subiendo un total de {total_a_subir} licitaciones (desde agosto 2026) a Supabase...")
 
         tamano_lote = 5
         subidas_exitosas = 0
@@ -279,7 +240,7 @@ def sincronizar_licitaciones_navarra():
             f"Sincronización completada con éxito. Se han subido/actualizado {subidas_exitosas} de {total_a_subir} licitaciones."
         )
     else:
-        print("No hay licitaciones nuevas para procesar en este rango.")
+        print("No hay licitaciones nuevas desde agosto de 2026 para procesar.")
 
 
 if __name__ == "__main__":
