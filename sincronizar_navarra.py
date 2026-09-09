@@ -239,7 +239,7 @@ def sincronizar_licitaciones_navarra():
             "fuente": "Contratación Navarra",
         }
 
-     licitaciones_validas.append(elemento)
+        licitaciones_validas.append(elemento)
 
     # 4. Inserción optimizada con lotes pequeños y reintentos
     if licitaciones_validas:
