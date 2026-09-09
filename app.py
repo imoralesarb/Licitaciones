@@ -459,7 +459,7 @@ with col_rango:
 #    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
 # Sección de cantidad, pregunta y barra de resultados metidas dentro de un único recuadro unificado
-col_resultados, col_vacio = st.columns([35, 65])
+col_resultados, col_vacio = st.columns([30, 70])
 
 with col_resultados:
     with st.container(border=True):
