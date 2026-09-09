@@ -22,7 +22,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- ESTILOS CSS PERSONALIZADOS PARA LOS BOTONES Y LEYENDAS ---
+# --- ESTILOS CSS PERSONALIZADOS PARA DISEÑO Y ALINEACIÓN ---
 st.markdown(
     """
     <style>
@@ -42,6 +42,14 @@ st.markdown(
             background-color: #0052a3;
             box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
             color: white;
+        }
+        /* Ajuste para alinear verticalmente el texto de la pregunta con el checkbox y slider */
+        .alignment-fix {
+            display: flex;
+            align-items: center;
+            height: 100%;
+            font-size: 15px;
+            color: #31333F;
         }
     </style>
     """,
@@ -323,7 +331,7 @@ consulta_texto = st.text_input(
     key="consulta_texto",
 )
 
-# Panel de filtros avanzados
+# Panel de filtros avanzados (etiquetas con tamaño normal gracias a componentes estándar de Streamlit)
 st.markdown("### ⚙️ Filtros avanzados")
 col0, col_tipo, col1, col2, col3 = st.columns(5)
 
@@ -392,21 +400,27 @@ with col6:
         "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
     )
 with col7:
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        f_inicio = st.date_input("📅 Desde (Publicación)", value=date(2026, 1, 1), key="f_inicio")
-    with col_f2:
-        f_fin = st.date_input("Hasta (Publicación)", value=date(2026, 12, 31), key="f_fin")
-
-col_c1, col_res_q, col_res_chk, col_res_slider = st.columns([2, 2, 2, 3])
-with col_c1:
     fecha_cierre_tope = st.date_input(
         "⏳ Fecha fin de presentación (Mínima)", value=date(2026, 3, 1), key="fecha_cierre_tope"
     )
+
+# Rango de publicación compartido en una sola línea compacta
+col_f_lbl, col_f1, col_f2 = st.columns([1.2, 2, 2])
+with col_f_lbl:
+    st.markdown('<div class="alignment-fix">📅 Rango publicación:</div>', unsafe_allow_html=True)
+with col_f1:
+    f_inicio = st.date_input("Desde", value=date(2026, 1, 1), key="f_inicio", label_visibility="collapsed")
+with col_f2:
+    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
+
+# Sección de cantidad y mostrar todos perfectamente alineados visualmente
+col_res_q, col_res_chk, col_res_slider = st.columns([2.5, 2.5, 3])
 with col_res_q:
-    st.write("¿Cuántos resultados quieres ver?")
+    st.markdown('<div class="alignment-fix">¿Cuántos resultados quieres ver?</div>', unsafe_allow_html=True)
 with col_res_chk:
+    st.markdown('<div style="padding-top: 5px;">', unsafe_allow_html=True)
     mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
+    st.markdown('</div>', unsafe_allow_html=True)
 with col_res_slider:
     limite_resultados = st.slider(
         "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados", label_visibility="collapsed"
