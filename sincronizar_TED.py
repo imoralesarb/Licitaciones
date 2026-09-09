@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import datetime, date, timedelta
 import os
 import time
@@ -76,6 +77,26 @@ def limpiar_organo(organo):
         texto = texto.replace(char, "")
     return texto.strip()
 
+def limpiar_tipo_contrato(tipo_raw):
+    """Mapea el contract-nature de TED a formatos estandarizados."""
+    if isinstance(tipo_raw, list):
+        tipo_raw = tipo_raw[0] if tipo_raw else ""
+    elif isinstance(tipo_raw, dict):
+        tipo_raw = tipo_raw.get("eng") or next(iter(tipo_raw.values()), "")
+    
+    t_str = str(tipo_raw).strip().lower()
+    
+    if "supplies" in t_str or "suministro" in t_str:
+        return "Suministros"
+    elif "services" in t_str or "servicio" in t_str:
+        return "Servicios"
+    elif "works" in t_str or "obra" in t_str:
+        return "Obras"
+    elif t_str and t_str != "no especificado":
+        return str(tipo_raw).strip().capitalize()
+    
+    return "No especificado"
+
 def procesar_campo(campo, es_lista=False):
     if isinstance(campo, list):
         limpios = [str(x) for x in campo if x]
@@ -97,7 +118,8 @@ def consultar_ted_api_scroll():
         "organisation-name-buyer", "publication-date",
         "deadline-receipt-request", "place-of-performance",
         "classification-cpv", "description-proc",
-        "total-value", "total-value-cur", "notice-type", "form-type"
+        "total-value", "total-value-cur", "notice-type", "form-type",
+        "contract-nature"
     ]
     
     hoy = date.today()
@@ -186,7 +208,7 @@ def sincronizar_licitaciones_ted():
         print("ℹ️ No se obtuvieron avisos de la API de TED.")
         return
 
-    # Cargar estado actual de Supabase para evitar duplicados y detectar actualizaciones
+    # Cargar estado actual de Supabase para evitar duplicados y detectar actualizaciones (incluyendo fuente y clave)
     try:
         existentes_resp = supabase.table("licitaciones").select("enlace, titulo, organo, fecha, fuente").execute()
         mapa_enlaces = {item["enlace"]: item for item in existentes_resp.data}
@@ -271,16 +293,27 @@ def sincronizar_licitaciones_ted():
         lugares_raw = ", ".join(procesar_campo(aviso.get("place-of-performance"), es_lista=True))
         lugares = mapear_lugar(lugares_raw)
         descripcion = procesar_campo(aviso.get("description-proc"))
+        tipo_contrato = limpiar_tipo_contrato(aviso.get("contract-nature"))
         
-        texto_completo = f"passage: Título: {titulo_limpio}. Objeto: {descripcion}. Órgano: {organo_limpio}. CPV: {cpvs}. Lugar: {lugares}. Importe: {importe} EUR."
+        # Estructura del texto para el embedding alineada con el tipo de contrato
+        texto_completo = f"passage: Título: {titulo_limpio}. Objeto: {descripcion}. Órgano: {organo_limpio}. Tipo de contrato: {tipo_contrato}. CPV: {cpvs}. Lugar: {lugares}. Importe: {importe} EUR."
 
         clave_duplicado = (titulo_limpio.lower(), organo_limpio.lower())
         
         es_novedad = False
         es_actualizada = False
+        fuente_final = "TED"
 
         if enlace in mapa_enlaces:
             reg_existente = mapa_enlaces[enlace]
+            fuente_existente = reg_existente.get("fuente", "TED")
+            
+            # Combinación inteligente de fuentes si ya existía con otra procedencia
+            if "PLACSP" in fuente_existente and "TED" not in fuente_existente:
+                fuente_final = f"{fuente_existente}, TED"
+            else:
+                fuente_final = fuente_existente
+
             if fecha_str > reg_existente.get("fecha", ""):
                 es_actualizada = True
         else:
@@ -303,9 +336,10 @@ def sincronizar_licitaciones_ted():
             "fecha_fin": fecha_fin_str,
             "lugar_ejecucion": lugares,
             "cpv": cpvs,
+            "tipo_contrato": tipo_contrato,
             "es_novedad": es_novedad,
             "es_actualizada": es_actualizada,
-            "fuente": "TED"
+            "fuente": fuente_final
         }
         
         licitaciones_validas.append(elemento)
