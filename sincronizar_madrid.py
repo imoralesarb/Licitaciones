@@ -293,37 +293,36 @@ def sincronizar_licitaciones_madrid():
         clave_duplicado = (titulo_str.strip().lower(), organo_base)
         
         # Validación de duplicados / existencia previa y gestión de fuentes o tipo de contrato faltante
+        fuente_final = "Comunidad de Madrid"
         if enlace in registros_db:
             reg_antiguo = registros_db[enlace]
-            fuente_actual = reg_antiguo.get("fuente", "")
+            fuente_actual = str(reg_antiguo.get("fuente", ""))
             tipo_actual = reg_antiguo.get("tipo_contrato", "")
             
-            actualizar_datos = {}
-            if "Comunidad de Madrid" not in fuente_actual:
-                nueva_fuente = f"{fuente_actual}, Comunidad de Madrid" if fuente_actual else "Comunidad de Madrid"
-                actualizar_datos["fuente"] = nueva_fuente
+            if "comunidad de madrid" not in fuente_actual.lower():
+                fuente_final = f"{fuente_actual}, Comunidad de Madrid" if fuente_actual else "Comunidad de Madrid"
+            else:
+                fuente_final = fuente_actual
 
+            actualizar_datos = {"fuente": fuente_final}
             if (not tipo_actual or tipo_actual == "No especificado") and tipo_contrato != "No especificado":
                 actualizar_datos["tipo_contrato"] = tipo_contrato
 
-            if actualizar_datos:
-                try:
-                    supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
-                    reg_antiguo.update(actualizar_datos)
-                except Exception as e:
-                    print(f"Error actualizando registro existente Madrid {enlace}: {e}")
+            try:
+                supabase.table("licitaciones").update(actualizar_datos).eq("enlace", enlace).execute()
+                reg_antiguo.update(actualizar_datos)
+            except Exception as e:
+                print(f"Error actualizando registro existente Madrid {enlace}: {e}")
+
+            # Si ya existía, actualizamos sus datos adicionales en BD pero evitamos reinsertarlo como nuevo
+            continue 
+        else:
+            fuente_final = "Comunidad de Madrid"
 
         texto_completo = f"passage: Título: {titulo_str}. Órgano: {organo}. Tipo de contrato: {tipo_contrato}. CPV: {cpv_codigo}. Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
         
         es_nuevo = enlace not in registros_db and clave_duplicado not in registros_existentes
         es_actualizado = False
-
-        if not es_nuevo and enlace in registros_db:
-            reg_antiguo = registros_db[enlace]
-            if (reg_antiguo.get("titulo") != titulo_str.strip() or 
-                reg_antiguo.get("importe") != importe or 
-                reg_antiguo.get("fecha_fin") != fecha_fin_str):
-                es_actualizado = True
 
         embedding = encoder.encode(texto_completo).tolist()
 
@@ -341,7 +340,7 @@ def sincronizar_licitaciones_madrid():
             "tipo_contrato": tipo_contrato,
             "es_novedad": es_nuevo,
             "es_actualizada": es_actualizado,
-            "fuente": "Comunidad de Madrid"
+            "fuente": fuente_final
         }
 
         licitaciones_validas.append(elemento)
