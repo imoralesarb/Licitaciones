@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from datetime import datetime, date, timedelta
 import os
 import time
@@ -293,6 +292,8 @@ def sincronizar_licitaciones_ted():
         lugares_raw = ", ".join(procesar_campo(aviso.get("place-of-performance"), es_lista=True))
         lugares = mapear_lugar(lugares_raw)
         descripcion = procesar_campo(aviso.get("description-proc"))
+        
+        # Extracción y limpieza del tipo de contrato
         tipo_contrato = limpiar_tipo_contrato(aviso.get("contract-nature"))
         
         # Estructura del texto para el embedding alineada con el tipo de contrato
