@@ -459,7 +459,7 @@ with col_rango:
 #    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
 # Sección de cantidad, pregunta y barra de resultados metidas dentro de un único recuadro unificado
-col_resultados, col_vacio = st.columns([40, 60])
+col_resultados, col_vacio = st.columns([50, 50])
 
 with col_resultados:
     with st.container(border=True):
@@ -480,7 +480,7 @@ with col_resultados:
 
         with col_res_texto:
             st.markdown(
-                '<div style="font-size: 14px; padding-top: 8px;">'
+                '<div style="font-size: 15px; padding-top: 8px;">'
                 'Seleccionar número de resultados:'
                 '</div>',
                 unsafe_allow_html=True
