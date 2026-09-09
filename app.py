@@ -327,7 +327,7 @@ def limpiar_campos():
     st.session_state.importe_min = 0.0
     st.session_state.importe_max = 0.0
     st.session_state.limite_resultados = 10
-    st.session_state.mostrar_todos = False
+    st.session_state.mostrar_todos = True
     st.session_state.df_resultados = None
     st.session_state.mensaje_estado = ""
 
@@ -468,10 +468,10 @@ with col_resultados:
 
         with col_res_chk:
             mostrar_todos = st.checkbox(
-                value=True,
-                "Mostrar TODOS los resultados",
-                key="mostrar_todos"
-            )
+            "Mostrar TODOS los resultados",
+            value=True,
+            key="mostrar_todos"
+        )
 
         with col_res_texto:
             st.markdown(
