@@ -142,8 +142,13 @@ def sincronizar_licitaciones_rioja():
         except (ValueError, TypeError):
             importe = 0.0
 
-        cpv_raw = aviso.get("CPVS", "No especificado")
-        cpv = str(cpv_raw).strip() if cpv_raw else "No especificado"
+        cpv_raw = aviso.get("CPVS", "")
+        if cpv_raw:
+            partes = [p.strip().split(',')[0] for p in str(cpv_raw).split(';') if p.strip()]
+            cpv_limpios = list(dict.fromkeys([p for p in partes if p.isdigit()]))
+            cpv = ", ".join(cpv_limpios) if cpv_limpios else "No especificado"
+        else:
+            cpv = "No especificado"
 
         lugar_bruto = aviso.get("LUGAR_EJECUCION", "ES230")
         lugar_ejecucion = procesar_lugar_rioja(lugar_bruto)
