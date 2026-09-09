@@ -428,20 +428,20 @@ with col_fecha_fin:
     )
 
 with col_rango:
-    st.markdown("📅 Rango publicación:")
+    # st.markdown("📅 Rango publicación:")
 
     col_desde, col_hasta = st.columns(2)
 
     with col_desde:
         f_inicio = st.date_input(
-            "Desde",
+            "📅 Rango publicación (Desde)",
             value=date(2026, 1, 1),
             key="f_inicio"
         )
 
     with col_hasta:
         f_fin = st.date_input(
-            "Hasta",
+            "📅 Rango publicación (Hasta)",
             value=date(2026, 12, 31),
             key="f_fin"
         )
