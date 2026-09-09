@@ -22,7 +22,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- ESTILOS CSS PERSONALIZADOS PARA DISEÑO Y ALINEACIÓN ---
+# --- ESTILOS CSS PERSONALIZADOS PARA DISEÑO Y RECUADROS ---
 st.markdown(
     """
     <style>
@@ -43,7 +43,15 @@ st.markdown(
             box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
             color: white;
         }
-        /* Ajuste para alinear verticalmente el texto de la pregunta con el checkbox y slider */
+        /* Contenedor con borde elegante para agrupar los controles de resultados */
+        .results-container {
+            background-color: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
         .alignment-fix {
             display: flex;
             align-items: center;
@@ -331,7 +339,7 @@ consulta_texto = st.text_input(
     key="consulta_texto",
 )
 
-# Panel de filtros avanzados (etiquetas con tamaño normal gracias a componentes estándar de Streamlit)
+# Panel de filtros avanzados
 st.markdown("### ⚙️ Filtros avanzados")
 col0, col_tipo, col1, col2, col3 = st.columns(5)
 
@@ -413,18 +421,17 @@ with col_f1:
 with col_f2:
     f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
-# Sección de cantidad y mostrar todos perfectamente alineados visualmente
-col_res_q, col_res_chk, col_res_slider = st.columns([2.5, 2.5, 3])
-with col_res_q:
-    st.markdown('<div class="alignment-fix">¿Cuántos resultados quieres ver?</div>', unsafe_allow_html=True)
+# Sección de cantidad y opciones de resultados metidas dentro de un recuadro unificado
+st.markdown('<div class="results-container">', unsafe_allow_html=True)
+st.markdown("**¿Cuántos resultados quieres ver?**")
+col_res_chk, col_res_slider = st.columns([2, 4])
 with col_res_chk:
-    st.markdown('<div style="padding-top: 5px;">', unsafe_allow_html=True)
     mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
-    st.markdown('</div>', unsafe_allow_html=True)
 with col_res_slider:
     limite_resultados = st.slider(
         "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados", label_visibility="collapsed"
     )
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.write("")
 
