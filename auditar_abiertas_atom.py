@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import datetime, date
 import os
 import requests
@@ -135,7 +136,18 @@ def auditar_licitaciones_abiertas():
                     reg["fecha_fin"] = nueva_fecha_fin
                     reg["es_actualizada"] = True
                     
-                    texto_evaluacion = f"passage: Título: {reg.get('titulo')}. Objeto: {reg.get('texto_completo')}. Órgano: {reg.get('organo')}. Importe: {reg.get('importe')} EUR."
+                    # Reconstrucción coherente del texto de evaluación y embedding acorde al script principal
+                    t_val = reg.get('titulo', '')
+                    o_val = reg.get('organo', '')
+                    tc_val = reg.get('tipo_contrato', 'No especificado')
+                    cpv_val = reg.get('cpv', 'No especificado')
+                    lug_val = reg.get('lugar_ejecucion', 'No especificado')
+                    imp_val = reg.get('importe', 0.0)
+                    
+                    # Extraer descripción limpia si está guardada en texto_completo o dejar vacío
+                    texto_evaluacion = f"passage: Título: {t_val}. Órgano: {o_val}. Tipo de contrato: {tc_val}. CPV: {cpv_val}. Lugar: {lug_val}. Importe: {imp_val} EUR."
+                    
+                    reg["texto_completo"] = texto_evaluacion
                     reg["embedding"] = encoder.encode(texto_evaluacion).tolist()
                     
                     supabase.table("licitaciones").upsert(reg, on_conflict="enlace").execute()
