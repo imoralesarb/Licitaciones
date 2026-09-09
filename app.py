@@ -464,19 +464,24 @@ col_resultados, col_vacio = st.columns([30, 70])
 with col_resultados:
     with st.container(border=True):
 
+        st.markdown(
+            "<strong>¿Cuántos resultados quieres ver?</strong>",
+            unsafe_allow_html=True
+        )
+
         col_res_chk, col_res_texto, col_res_slider = st.columns([2.5, 2, 4])
 
         with col_res_chk:
             mostrar_todos = st.checkbox(
-            "Mostrar TODOS los resultados",
-            value=True,
-            key="mostrar_todos"
-        )
+                "Mostrar TODOS los resultados",
+                value=True,
+                key="mostrar_todos"
+            )
 
         with col_res_texto:
             st.markdown(
                 '<div style="padding-top: 8px;">'
-                '<strong>Seleccionar número de resultados:</strong>'
+                '<strong>Número de resultados:</strong>'
                 '</div>',
                 unsafe_allow_html=True
             )
@@ -490,6 +495,8 @@ with col_resultados:
                 key="limite_resultados",
                 label_visibility="collapsed"
             )
+
+
 
 # --- BOTONES DE ACCIÓN PRINCIPAL ---
 col_btn_buscar, col_btn_novedades, col_btn_limpiar = st.columns([2, 2, 2])
