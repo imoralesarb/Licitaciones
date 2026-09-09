@@ -312,8 +312,6 @@ def limpiar_campos():
     st.session_state.importe_max = 0.0
     st.session_state.limite_resultados = 10
     st.session_state.mostrar_todos = False
-    st.session_state.usar_filtro_fechas = False
-    st.session_state.usar_filtro_cierre = False
     st.session_state.df_resultados = None
     st.session_state.mensaje_estado = ""
 
@@ -394,37 +392,29 @@ with col6:
         "🔢 Código CPV", placeholder="ej. 45210000", key="filtro_cpv_codigo"
     )
 with col7:
-    limite_resultados = st.slider(
-        "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados"
-    )
-
-col_chk1, col_chk2, col_chk3 = st.columns([1, 2, 2])
-with col_chk1:
     mostrar_todos = st.checkbox("Mostrar TODOS los resultados", key="mostrar_todos")
-with col_chk2:
-    usar_filtro_fechas = st.checkbox(
-        "📅 Rango fecha publicación en plataforma", key="usar_filtro_fechas"
-    )
-with col_chk3:
-    usar_filtro_cierre = st.checkbox(
-        "⏳ Fecha fin de presentación de oferta", key="usar_filtro_cierre"
+
+st.markdown("##### 📅 Rango de fecha de publicación en plataforma")
+col_f1, col_f2 = st.columns(2)
+with col_f1:
+    f_inicio = st.date_input("Desde", value=date(2026, 1, 1), key="f_inicio")
+with col_f2:
+    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin")
+
+st.markdown("##### ⏳ Fecha fin de presentación de oferta")
+col_c1, _ = st.columns([1, 1])
+with col_c1:
+    fecha_cierre_tope = st.date_input(
+        "Fecha tope mínima de fin de presentación", value=date(2026, 3, 1), key="fecha_cierre_tope"
     )
 
-if usar_filtro_fechas:
-    st.markdown("##### Rango de fecha de publicación")
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        f_inicio = st.date_input("Desde", value=date(2026, 1, 1))
-    with col_f2:
-        f_fin = st.date_input("Hasta", value=date(2026, 12, 31))
-
-if usar_filtro_cierre:
-    st.markdown("##### Fecha fin de presentación de oferta")
-    col_c1, _ = st.columns([1, 1])
-    with col_c1:
-        fecha_cierre_tope = st.date_input(
-            "Fecha tope mínima de fin de presentación", value=date(2026, 3, 1)
-        )
+col_res_label, col_res_slider = st.columns([2, 4])
+with col_res_label:
+    st.markdown("**¿Cuántos resultados quieres ver?**")
+with col_res_slider:
+    limite_resultados = st.slider(
+        "Resultados", min_value=1, max_value=500, value=10, key="limite_resultados", label_visibility="collapsed"
+    )
 
 st.write("")
 
@@ -533,28 +523,26 @@ def aplicar_filtros_comunes(df):
             df = df[df["cpv"].apply(coincide_codigo_cpv)]
 
     # 8. Fechas de cierre
-    if usar_filtro_cierre:
-        def filtrar_fecha_fin(f_str):
-            if not f_str:
-                return False
-            try:
-                return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
-            except ValueError:
-                return False
-        if "fecha_fin" in df.columns:
-            df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
+    def filtrar_fecha_fin(f_str):
+        if not f_str:
+            return False
+        try:
+            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+        except ValueError:
+            return False
+    if "fecha_fin" in df.columns:
+        df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
 
     # 9. Fechas de publicación
-    if usar_filtro_fechas:
-        def filtrar_fecha_pub(f_str):
-            if not f_str:
-                return False
-            try:
-                return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
-            except ValueError:
-                return False
-        if "fecha" in df.columns:
-            df = df[df["fecha"].apply(filtrar_fecha_pub)]
+    def filtrar_fecha_pub(f_str):
+        if not f_str:
+            return False
+        try:
+            return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
+        except ValueError:
+            return False
+    if "fecha" in df.columns:
+        df = df[df["fecha"].apply(filtrar_fecha_pub)]
 
     return df
 
