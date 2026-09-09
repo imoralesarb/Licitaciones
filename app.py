@@ -480,7 +480,7 @@ with col_resultados:
 
         with col_res_texto:
             st.markdown(
-                '<div style="font-size: 13px; padding-top: 8px;">'
+                '<div style="font-size: 14px; padding-top: 8px;">'
                 'Número de resultados:'
                 '</div>',
                 unsafe_allow_html=True
