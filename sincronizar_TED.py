@@ -17,7 +17,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TED_URL = "https://api.ted.europa.eu/v3/notices/search"
 HOY = date.today()
-FECHA_DESDE = HOY - timedelta(days=7)
+FECHA_DESDE = HOY - timedelta(days=2)
 print("Cargando modelo de IA...")
 modelo = SentenceTransformer("all-MiniLM-L6-v2")
 
