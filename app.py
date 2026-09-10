@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from supabase import Client, create_client
+from datetime import date, timedelta
 
 # Desactivar traductor automático del navegador
 st.markdown(
