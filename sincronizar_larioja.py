@@ -81,7 +81,7 @@ def sincronizar_licitaciones_rioja():
     # ========================================================
 
     hoy_date = datetime.now().date()
-    limite_fecha = hoy_date - timedelta(days=4)
+    limite_fecha = hoy_date - timedelta(days=2)
 
     print(f"Filtrando licitaciones publicadas desde: {limite_fecha} hasta {hoy_date}")
 
