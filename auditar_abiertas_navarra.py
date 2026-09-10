@@ -48,7 +48,7 @@ def auditar_licitaciones_cerradas_navarra():
         response_db = (
             supabase.table("licitaciones")
             .select("id, titulo, organo")
-            .eq("fuente", "Contratación Navarra")
+            .ilike("fuente", "%Contratación Navarra%")
             .execute()
         )
         registros_db = response_db.data
