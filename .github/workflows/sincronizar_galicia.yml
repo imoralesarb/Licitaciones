@@ -22,9 +22,9 @@ jobs:
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install feedparser supabase sentence-transformers lxml requests
+          pip install feedparser supabase sentence-transformers lxml requests beautifulsoup4
 
-      - name: Ejecutar script TED
+      - name: Ejecutar script Galicia
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
