@@ -19,7 +19,10 @@ TED_URL = "https://api.ted.europa.eu/v3/notices/search"
 HOY = date.today()
 FECHA_DESDE = HOY - timedelta(days=2)
 print("Cargando modelo de IA...")
-modelo = SentenceTransformer("all-MiniLM-L6-v2")
+modelo = SentenceTransformer(
+    "intfloat/multilingual-e5-small",
+    device="cpu"
+)
 
 # ============================================================
 # FUNCIONES AUXILIARES
