@@ -342,7 +342,6 @@ def parsear_importe(valor):
         .replace("EUR", "")
     )
 
-    # Buscar únicamente la parte numérica
     match = re.search(
         r"[-+]?\d[\d\.,]*(?:[eE][-+]?\d+)?",
         texto
@@ -355,7 +354,6 @@ def parsear_importe(valor):
         0
     )
 
-    # Notación científica
     if re.search(
         r"[eE][-+]?\d+",
         numero
@@ -374,8 +372,6 @@ def parsear_importe(valor):
 
             return 0.0
 
-    # Formato europeo:
-    # 3.600.000,00
     if "," in numero:
 
         numero = numero.replace(
@@ -388,7 +384,6 @@ def parsear_importe(valor):
             "."
         )
 
-    # Varios puntos = separadores de miles
     elif numero.count(".") > 1:
 
         numero = numero.replace(
@@ -465,14 +460,30 @@ def mapear_tipo_contrato(tipo):
 
 def mapear_lugar_galicia(lugar):
     """
-    Limpia NUTS de Galicia.
+    Limpia el lugar de ejecución de Galicia.
 
     Ejemplos:
-        ES111 A Coruña -> A Coruña
-        ES112 Lugo -> Lugo
-        ES113 Ourense -> Ourense
-        ES114 Pontevedra -> Pontevedra
-        ES España -> se elimina
+
+        ES111 A Coruña
+            -> A Coruña
+
+        ES111 A Coruña 1 09-09-2026 11:24
+            -> A Coruña
+
+        Lugo 3 09-09-2026 11:24
+            -> Lugo
+
+        A Coruña 5 09-09-2026 11:24
+            -> A Coruña
+
+        A Coruña 6 09-09-2026 11:24
+            -> A Coruña
+
+        ES113 Ourense
+            -> Ourense
+
+        ES España
+            -> No especificado
     """
 
     if not lugar:
@@ -482,59 +493,99 @@ def mapear_lugar_galicia(lugar):
         lugar
     )
 
-    # Separar posibles lugares
-    partes = [
-        p.strip()
-        for p in texto.split(",")
-        if p.strip()
+    # Eliminar códigos NUTS
+    texto = re.sub(
+        r"\bES\d{3}\b",
+        "",
+        texto,
+        flags=re.IGNORECASE
+    )
+
+    # Eliminar ES España
+    texto = re.sub(
+        r"\bES\s+España\b",
+        "",
+        texto,
+        flags=re.IGNORECASE
+    )
+
+    # Eliminar fechas y horas.
+    #
+    # Ejemplo:
+    # 09-09-2026 11:24
+    #
+    texto = re.sub(
+        r"\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}"
+        r"(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b",
+        "",
+        texto
+    )
+
+    # Eliminar posibles separadores
+    texto = texto.replace(
+        "_",
+        " "
+    )
+
+    texto = normalizar_texto(
+        texto
+    )
+
+    # Provincias de Galicia.
+    #
+    # Buscamos el nombre de la provincia dentro
+    # del texto y descartamos todo lo que venga
+    # después.
+    provincias = [
+        "A Coruña",
+        "Lugo",
+        "Ourense",
+        "Pontevedra"
     ]
 
     resultado = []
 
+    # Separar posibles localizaciones
+    partes = re.split(
+        r",|;",
+        texto
+    )
+
     for parte in partes:
 
-        # Eliminar código NUTS:
-        # ES111 A Coruña -> A Coruña
-        parte_limpia = re.sub(
-            r"^ES\d{3}\s*",
-            "",
-            parte,
-            flags=re.IGNORECASE
-        ).strip()
+        parte = normalizar_texto(
+            parte
+        )
 
-        # Eliminar ES España
-        if re.fullmatch(
-            r"ES\s+España",
-            parte_limpia,
-            flags=re.IGNORECASE
-        ):
+        if not parte:
             continue
 
-        # Eliminar España sola
-        if parte_limpia.lower() == "españa":
-            continue
+        parte_normalizada = normalizar_organo(
+            parte
+        )
 
-        if parte_limpia:
-            resultado.append(
-                parte_limpia
+        for provincia in provincias:
+
+            provincia_normalizada = normalizar_organo(
+                provincia
             )
 
-    # Eliminar duplicados
-    resultado_final = []
+            # Si aparece la provincia, nos quedamos
+            # únicamente con su nombre.
+            if provincia_normalizada in parte_normalizada:
 
-    for lugar_limpio in resultado:
+                if provincia not in resultado:
+                    resultado.append(
+                        provincia
+                    )
 
-        if lugar_limpio not in resultado_final:
+                break
 
-            resultado_final.append(
-                lugar_limpio
-            )
-
-    if not resultado_final:
+    if not resultado:
         return "No especificado"
 
     return ", ".join(
-        resultado_final
+        resultado
     )
 
 
@@ -578,7 +629,6 @@ def extraer_dt_dd(
 
         if texto_dt == etiqueta_normalizada:
 
-            # Primero hermano directo
             dd = dt.find_next_sibling(
                 "dd"
             )
@@ -592,7 +642,6 @@ def extraer_dt_dd(
                     )
                 )
 
-            # Fallback
             siguiente = dt.find_next(
                 "dd"
             )
@@ -717,7 +766,6 @@ def extraer_cpv(
 
     cpvs = []
 
-    # Buscar códigos de 8 dígitos
     texto_panel = normalizar_texto(
         panel.get_text(
             " ",
@@ -775,9 +823,10 @@ def extraer_nuts(
     # Buscar patrones como:
     # ES111 A Coruña
     # ES113 Ourense
-    # ES España
+    # ES112 Lugo
+    # ES114 Pontevedra
     encontrados = re.findall(
-        r"ES\d{3}\s+[^ES]+?(?=\s+ES\d{3}\s+|\s+ES\s+España|$)",
+        r"ES\d{3}\s+.*?(?=\s+ES\d{3}\s+|\s+ES\s+España|$)",
         texto,
         flags=re.IGNORECASE
     )
@@ -804,7 +853,7 @@ def extraer_nuts(
                 lugares
             )
 
-    # Fallback: buscar códigos NUTS directamente
+    # Fallback
     patrones = re.findall(
         r"ES\d{3}\s+[A-Za-zÁÉÍÓÚáéíóúÑñÜüÀÈÌÒÙàèìòùÇç ]+",
         texto
@@ -932,19 +981,6 @@ def extraer_detalle_galicia(
 
     # --------------------------------------------------------
     # IMPORTE FINAL
-    # --------------------------------------------------------
-    #
-    # Si existe presupuesto base > 0:
-    #     usar presupuesto base
-    #
-    # Si no:
-    #     usar valor estimado
-    #
-    # Esto soluciona casos como:
-    #
-    # Valor estimado
-    # 3.600.000,00 sen IVE
-    #
     # --------------------------------------------------------
 
     if importe_presupuesto > 0:
@@ -1253,6 +1289,46 @@ def sincronizar_licitaciones_galicia():
 
         return
 
+    total_listado = len(
+        results
+    )
+
+    # ========================================================
+    # FILTRAR ÚLTIMOS 3 DÍAS
+    # ========================================================
+
+    resultados_periodo = []
+
+    for aviso in results:
+
+        fecha_pub_str = aviso.get(
+            "fechaPublicacion",
+            ""
+        )
+
+        fecha_pub = parsear_fecha(
+            fecha_pub_str
+        )
+
+        if not fecha_pub:
+            continue
+
+        pub_date = fecha_pub.date()
+
+        if (
+            pub_date >= limite_fecha
+            and pub_date <= hoy_date
+        ):
+
+            resultados_periodo.append(
+                aviso
+            )
+
+    print(
+        f"Registros dentro de los últimos 3 días: "
+        f"{len(resultados_periodo)}"
+    )
+
     # ========================================================
     # 2. CARGAR BBDD
     # ========================================================
@@ -1482,7 +1558,7 @@ def sincronizar_licitaciones_galicia():
         )
 
     # ========================================================
-    # 4. PROCESAR PUBLICACIONES
+    # 4. PROCESAR PUBLICACIONES DE LOS ÚLTIMOS 3 DÍAS
     # ========================================================
 
     licitaciones_nuevas = []
@@ -1491,7 +1567,7 @@ def sincronizar_licitaciones_galicia():
     claves_procesadas_sesion = set()
 
     for i, aviso in enumerate(
-        results,
+        resultados_periodo,
         1
     ):
 
@@ -1501,10 +1577,6 @@ def sincronizar_licitaciones_galicia():
 
         if not codigo:
             continue
-
-        # ----------------------------------------------------
-        # FECHA DEL LISTADO
-        # ----------------------------------------------------
 
         fecha_pub_str = aviso.get(
             "fechaPublicacion",
@@ -1519,13 +1591,6 @@ def sincronizar_licitaciones_galicia():
             continue
 
         pub_date = fecha_pub.date()
-
-        # Solo últimos 3 días
-        if (
-            pub_date < limite_fecha
-            or pub_date > hoy_date
-        ):
-            continue
 
         fecha_pub_formateada = (
             pub_date.strftime(
@@ -1550,7 +1615,7 @@ def sincronizar_licitaciones_galicia():
         )
 
         print(
-            f"\n[{i}/{len(results)}] "
+            f"\n[{i}/{len(resultados_periodo)}] "
             f"Procesando licitación {codigo}..."
         )
 
@@ -2263,6 +2328,7 @@ def sincronizar_licitaciones_galicia():
                 not fecha_fin_db
                 or fecha_fin_db == "No especificada"
             ):
+
                 continue
 
             try:
@@ -2530,24 +2596,33 @@ def sincronizar_licitaciones_galicia():
     )
 
     print(
-        f"Publicaciones encontradas:       {len(results)}"
+        f"Publicaciones encontradas:        "
+        f"{total_listado}"
     )
 
     print(
-        f"Nuevas insertadas:               {nuevas}"
+        f"Publicaciones últimos 3 días:     "
+        f"{len(resultados_periodo)}"
     )
 
     print(
-        f"Actualizadas:                    {actualizadas}"
+        f"Nuevas insertadas:                "
+        f"{nuevas}"
     )
 
     print(
-        f"Ya existentes sin cambios:       "
+        f"Actualizadas:                     "
+        f"{actualizadas}"
+    )
+
+    print(
+        f"Ya existentes sin cambios:        "
         f"{ya_existentes_sin_cambios}"
     )
 
     print(
-        f"Duplicadas por título + órgano:  {duplicadas}"
+        f"Duplicadas por título + órgano:   "
+        f"{duplicadas}"
     )
 
     print(
@@ -2556,7 +2631,8 @@ def sincronizar_licitaciones_galicia():
     )
 
     print(
-        f"Errores:                          {errores}"
+        f"Errores:                           "
+        f"{errores}"
     )
 
     print(
