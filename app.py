@@ -547,33 +547,52 @@ def aplicar_filtros_comunes(df):
     # 1. Filtro de fuente
     # 1. Filtro de fuente - DEBUG
     if filtro_fuente:
-        st.write("FILTRO SELECCIONADO:", [repr(f) for f in filtro_fuente])
-    
-        fuentes_navarra = df[
-            df["fuente"]
-            .astype(str)
-            .str.contains("Navarra", case=False, na=False)
-        ]["fuente"].unique()
-    
-        st.write("FUENTES CON NAVARRA:", [repr(f) for f in fuentes_navarra])
-    
-        fuentes_seleccionadas = [
-            f.strip().casefold()
-            for f in filtro_fuente
-        ]
-    
-        df = df[
-            df["fuente"]
-            .fillna("")
-            .astype(str)
-            .apply(
-                lambda x: any(
-                    fuente in x.casefold()
-                    for fuente in fuentes_seleccionadas
-                )
-            )
-        ]
+    st.write("FILTRO SELECCIONADO:", [repr(f) for f in filtro_fuente])
 
+    fuentes_navarra = df[
+        df["fuente"]
+        .astype(str)
+        .str.contains("Navarra", case=False, na=False)
+    ]["fuente"].unique()
+
+    st.write("FUENTES CON NAVARRA:", [repr(f) for f in fuentes_navarra])
+
+    # Comparación carácter a carácter
+    if fuentes_navarra.size > 0:
+        seleccionada = filtro_fuente[0]
+        fuente_bd = fuentes_navarra[0]
+
+        st.write("SELECCIONADA:", repr(seleccionada))
+        st.write("BD:", repr(fuente_bd))
+        st.write("¿SON IGUALES?:", seleccionada == fuente_bd)
+        st.write("LONGITUD SELECCIONADA:", len(seleccionada))
+        st.write("LONGITUD BD:", len(fuente_bd))
+        st.write(
+            "CÓDIGOS SELECCIONADA:",
+            [ord(c) for c in seleccionada]
+        )
+        st.write(
+            "CÓDIGOS BD:",
+            [ord(c) for c in fuente_bd]
+        )
+
+    # Filtro
+    fuentes_seleccionadas = [
+        f.strip().casefold()
+        for f in filtro_fuente
+    ]
+
+    df = df[
+        df["fuente"]
+        .fillna("")
+        .astype(str)
+        .apply(
+            lambda x: any(
+                fuente in x.casefold()
+                for fuente in fuentes_seleccionadas
+            )
+        )
+    ]
     # 2. Filtro de tipo de contrato flexible
     if filtro_tipo_contrato: 
         if "tipo_contrato" in df.columns:
