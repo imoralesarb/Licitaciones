@@ -540,18 +540,13 @@ def aplicar_filtros_comunes(df):
     if df.empty:
         return df
 
-    # 1. Filtro de fuente flexible para múltiples selecciones
-    #if filtro_fuente:
-     #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
-     #   df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
+    st.write("INICIO:", len(df))
+
+    # 1. Filtro de fuente
     if filtro_fuente:
-        st.write("FILTRO:", filtro_fuente)
-    
         for fuente in filtro_fuente:
             st.write(
-                "FUENTE:",
-                repr(fuente),
-                "->",
+                f"FUENTE '{fuente}':",
                 df["fuente"].astype(str).str.contains(
                     fuente,
                     case=False,
@@ -560,7 +555,7 @@ def aplicar_filtros_comunes(df):
                 ).sum(),
                 "coincidencias"
             )
-    
+
         df = df[
             df["fuente"]
             .fillna("")
@@ -572,87 +567,177 @@ def aplicar_filtros_comunes(df):
                 )
             )
         ]
-    # 2. Filtro de tipo de contrato flexible
-    if filtro_tipo_contrato: 
+
+    st.write("DESPUÉS FUENTE:", len(df))
+
+    # 2. Filtro de tipo de contrato
+    if filtro_tipo_contrato:
         if "tipo_contrato" in df.columns:
-            patron_tipos = "|".join([r"\b" + t + r"\b" for t in filtro_tipo_contrato])
-            df = df[df["tipo_contrato"].str.contains(patron_tipos, case=False, na=False, regex=True)]
+            patron_tipos = "|".join(
+                [r"\b" + t + r"\b" for t in filtro_tipo_contrato]
+            )
+            df = df[
+                df["tipo_contrato"].str.contains(
+                    patron_tipos,
+                    case=False,
+                    na=False,
+                    regex=True
+                )
+            ]
+
+    st.write("DESPUÉS TIPO CONTRATO:", len(df))
 
     # 3. Importes
     if importe_min > 0:
         df = df[df["importe"] >= importe_min]
+
     if importe_max > 0:
         df = df[df["importe"] <= importe_max]
 
+    st.write("DESPUÉS IMPORTE:", len(df))
+
     # 4. CCAA
     if filtro_ccaa:
-        palabras_clave_totales = []
         patrones = []
+
         for item_ccaa in filtro_ccaa:
-            palabras_clave = MAPA_TERRITORIAL.get(item_ccaa, [item_ccaa])
+            palabras_clave = MAPA_TERRITORIAL.get(
+                item_ccaa,
+                [item_ccaa]
+            )
+
             for p in palabras_clave:
                 if p == "Palma":
                     patrones.append(r"(?<![Ll][Aa]\s)\bPalma\b")
                 else:
                     patrones.append(r"\b" + p + r"\b")
+
         patron_regex = "|".join(patrones)
-        df = df[df["lugar_ejecucion"].str.contains(patron_regex, case=False, na=False, regex=True)]
+
+        df = df[
+            df["lugar_ejecucion"].str.contains(
+                patron_regex,
+                case=False,
+                na=False,
+                regex=True
+            )
+        ]
+
+    st.write("DESPUÉS CCAA:", len(df))
 
     # 5. Lugar libre
     if filtro_lugar_libre.strip():
-        df = df[df["lugar_ejecucion"].str.contains(filtro_lugar_libre.strip(), case=False, na=False)]
+        df = df[
+            df["lugar_ejecucion"].str.contains(
+                filtro_lugar_libre.strip(),
+                case=False,
+                na=False
+            )
+        ]
+
+    st.write("DESPUÉS LUGAR LIBRE:", len(df))
 
     # 6. Sector CPV
     if filtro_cpv_sector:
         prefijos_validos = []
+
         for s in filtro_cpv_sector:
             prefijos_validos.extend(SECTORES_CPV[s])
+
         prefijos_validos = tuple(prefijos_validos)
-        
+
         def coincide_cpv(cpv_str):
-            if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+            if (
+                not cpv_str
+                or pd.isna(cpv_str)
+                or cpv_str == "No especificado"
+            ):
                 return False
-            lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-            return any(c.startswith(prefijos_validos) for c in lista_cpv)
-            
+
+            lista_cpv = [
+                c.strip()
+                for c in str(cpv_str).split(",")
+            ]
+
+            return any(
+                c.startswith(prefijos_validos)
+                for c in lista_cpv
+            )
+
         if "cpv" in df.columns:
             df = df[df["cpv"].apply(coincide_cpv)]
+
+    st.write("DESPUÉS SECTOR CPV:", len(df))
 
     # 7. Código CPV específico
     if filtro_cpv_codigo.strip():
         codigo_busqueda = filtro_cpv_codigo.strip()
+
         def coincide_codigo_cpv(cpv_str):
-            if not cpv_str or pd.isna(cpv_str) or cpv_str == "No especificado":
+            if (
+                not cpv_str
+                or pd.isna(cpv_str)
+                or cpv_str == "No especificado"
+            ):
                 return False
-            lista_cpv = [c.strip() for c in str(cpv_str).split(",")]
-            return any(codigo_busqueda in c for c in lista_cpv)
+
+            lista_cpv = [
+                c.strip()
+                for c in str(cpv_str).split(",")
+            ]
+
+            return any(
+                codigo_busqueda in c
+                for c in lista_cpv
+            )
+
         if "cpv" in df.columns:
             df = df[df["cpv"].apply(coincide_codigo_cpv)]
 
-    # 8. Fechas de cierre
+    st.write("DESPUÉS CÓDIGO CPV:", len(df))
+
+    # 8. Fecha de cierre
     def filtrar_fecha_fin(f_str):
         if not f_str:
             return False
+
         try:
-            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+            return date.fromisoformat(
+                str(f_str)[:10]
+            ) >= fecha_cierre_tope
         except ValueError:
             return False
-    if "fecha_fin" in df.columns:
-        df = df[df["fecha_fin"].apply(filtrar_fecha_fin)]
 
-    # 9. Fechas de publicación
+    if "fecha_fin" in df.columns:
+        df = df[
+            df["fecha_fin"].apply(filtrar_fecha_fin)
+        ]
+
+    st.write("DESPUÉS FECHA CIERRE:", len(df))
+
+    # 9. Fecha de publicación
     def filtrar_fecha_pub(f_str):
         if not f_str:
             return False
+
         try:
-            return f_inicio <= date.fromisoformat(f_str[:10]) <= f_fin
+            fecha_pub = date.fromisoformat(
+                str(f_str)[:10]
+            )
+
+            return f_inicio <= fecha_pub <= f_fin
+
         except ValueError:
             return False
+
     if "fecha" in df.columns:
-        df = df[df["fecha"].apply(filtrar_fecha_pub)]
+        df = df[
+            df["fecha"].apply(filtrar_fecha_pub)
+        ]
+
+    st.write("DESPUÉS FECHA PUBLICACIÓN:", len(df))
 
     return df
-
 
 # 5. Lógica del Botón de Novedades
 if btn_novedades:
