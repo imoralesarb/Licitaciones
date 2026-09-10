@@ -541,6 +541,10 @@ def aplicar_filtros_comunes(df):
         return df
     st.write("FUENTES EN BBDD:")
     st.write(df["fuente"].value_counts(dropna=False))
+    st.write(
+        "Navarra:",
+        df[df["fuente"].astype(str).str.contains("Contratación Navarra", case=False, na=False)]
+    )
     # 1. Filtro de fuente flexible para múltiples selecciones
     #if filtro_fuente:
      #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
