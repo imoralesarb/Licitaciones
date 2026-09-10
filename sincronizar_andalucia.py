@@ -80,7 +80,7 @@ URL_DETALLE = (
 # Configuración de la sincronización
 # ------------------------------------------------------------
 
-FUENTE = "Andalucía"
+FUENTE = "Junta de Andalucía"
 
 TAMANO_PAGINA = 10
 
