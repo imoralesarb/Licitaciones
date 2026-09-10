@@ -704,7 +704,9 @@ if btn_novedades:
                 df["relevancia"] = (df["similarity"] * 100).round(2)
             else:
                 df["relevancia"] = 100.0
-
+                
+            st.write("FUENTES EN BBDD:")
+            st.write(df["fuente"].value_counts(dropna=False))
             df = aplicar_filtros_comunes(df)
 
             if df.empty:
