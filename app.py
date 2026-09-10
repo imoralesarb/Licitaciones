@@ -697,21 +697,28 @@ def aplicar_filtros_comunes(df):
     st.write("DESPUÉS CÓDIGO CPV:", len(df))
 
     # 8. Fecha de cierre
+    # 8. Fechas de cierre
     def filtrar_fecha_fin(f_str):
-        if not f_str:
-            return False
-
+        if pd.isna(f_str) or not str(f_str).strip():
+            return True
+    
+        f_str = str(f_str).strip()
+    
+        # Si no hay fecha de cierre especificada, no excluir la licitación
+        if f_str.lower() in ["no especificada", "no especificado"]:
+            return True
+    
         try:
-            return date.fromisoformat(
-                str(f_str)[:10]
-            ) >= fecha_cierre_tope
-        except ValueError:
-            return False
-
+            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+        except (ValueError, TypeError):
+            return True
+    
+    
     if "fecha_fin" in df.columns:
         df = df[
             df["fecha_fin"].apply(filtrar_fecha_fin)
         ]
+
 
     st.write("DESPUÉS FECHA CIERRE:", len(df))
 
