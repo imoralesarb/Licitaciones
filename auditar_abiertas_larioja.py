@@ -110,7 +110,7 @@ def auditar_licitaciones_rioja():
                     f_nueva_date = datetime.strptime(nueva_fecha_fin[:10], "%Y-%m-%d").date()
                     # Si la nueva fecha es válida y futura (o de hoy), la actualizamos
                     if f_nueva_date >= hoy_date:
-                        supabase.table("licitaciones").update({"fecha_fin": nueva_fecha_fin, "es_actualizada": True}).eq("id", reg_id).execute()
+                        supabase.table("licitaciones").update({"fecha_fin": nueva_fecha_fin}).eq("id", reg_id).execute()
                         actualizadas_fecha += 1
                         continue
                     else:
