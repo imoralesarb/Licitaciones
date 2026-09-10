@@ -438,6 +438,9 @@ def estado_permite_presentar_ofertas(estado):
 
     # Solo aceptamos estados claramente abiertos.
     palabras_abierto = (
+        "publicada",
+        "publicado",
+        "en plazo",
         "abierto",
         "plazo de presentacion",
         "licitacion abierta"
