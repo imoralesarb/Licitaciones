@@ -114,8 +114,22 @@ def sincronizar_licitaciones_euskadi():
     print("Reseteando flags de novedades y actualizaciones anteriores...")
 
     try:
-        supabase.rpc("reset_flags_euskadi").execute()
-        print("Flags reseteados con éxito.")
+        total_reseteadas = 0
+    
+        while True:
+            respuesta = supabase.rpc("reset_flags_euskadi_lote").execute()
+    
+            filas = respuesta.data or 0
+    
+            if filas == 0:
+                break
+    
+            total_reseteadas += filas
+    
+            print(f"  -> Reseteadas {filas} filas. Total: {total_reseteadas}")
+    
+        print(f"Flags reseteados con éxito: {total_reseteadas} registros.")
+    
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
 
