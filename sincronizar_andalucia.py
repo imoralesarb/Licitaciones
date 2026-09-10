@@ -19,6 +19,8 @@
 # 12. Las modificaciones reales se marcan como es_actualizada=True.
 # 13. Añadir Andalucía como fuente NO se considera una actualización.
 # 14. Se genera embedding para las nuevas licitaciones.
+# 15. El CPV se obtiene directamente de "codigosCpv" de Elasticsearch
+#     y se guarda únicamente el código, sin la denominación.
 
 
 from datetime import datetime, date, timedelta
@@ -236,9 +238,11 @@ def convertir_importe(valor):
         return None
 
     try:
+
         return float(texto)
 
     except ValueError:
+
         return None
 
 
@@ -605,17 +609,25 @@ def extraer_cpv(source):
     Extrae únicamente los códigos CPV del campo
     "codigosCpv" de Elasticsearch.
 
-    Ejemplo:
-        {
-            "codigo": "50850000-8",
-            "denominacion": "Servicios de reparación..."
-        }
+    Ejemplo de Elasticsearch:
+
+        "codigosCpv": [
+            {
+                "codigo": "50850000-8",
+                "denominacion":
+                    "Servicios de reparación y mantenimiento..."
+            }
+        ]
 
     Resultado:
+
         "50850000-8"
 
     Si hay varios CPV:
+
         "50850000-8, 30213100-6"
+
+    La denominación NO se guarda.
     """
 
     if not isinstance(source, dict):
@@ -652,9 +664,8 @@ def extraer_cpv(source):
             codigo
         )
 
-        # Nos aseguramos de guardar únicamente
-        # códigos CPV del formato 8 dígitos + guion + dígito.
-
+        # Extraer únicamente:
+        # 8 dígitos + guion + 1 dígito
         coincidencias = re.findall(
             r"\b\d{8}-\d\b",
             codigo
@@ -1683,23 +1694,26 @@ def extraer_datos_detalle(
     # --------------------------------------------------------
     # CPV
     # --------------------------------------------------------
-
-    # El CPV está directamente disponible en
-    # Elasticsearch dentro de "codigosCpv".
     #
-    # Se extrae únicamente el código, sin la denominación.
-    #
-    # Ejemplo:
+    # Elasticsearch proporciona directamente:
     #
     # "codigosCpv": [
     #     {
     #         "codigo": "50850000-8",
-    #         "denominacion": "Servicios de reparación..."
+    #         "denominacion":
+    #             "Servicios de reparación..."
     #     }
     # ]
     #
-    # Resultado:
+    # Se guarda únicamente:
+    #
     # "50850000-8"
+    #
+    # Si hay varios:
+    #
+    # "50850000-8, 30213100-6"
+    #
+    # No se guarda la denominación.
 
     cpv = extraer_cpv(
         source
