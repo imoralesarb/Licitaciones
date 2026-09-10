@@ -112,11 +112,9 @@ def sincronizar_licitaciones_euskadi():
 
     # 1. Resetear flags de novedades anteriores para la fuente Euskadi de forma masiva/segura
     print("Reseteando flags de novedades y actualizaciones anteriores...")
+
     try:
-        supabase.table("licitaciones").update({
-            "es_novedad": False,
-            "es_actualizada": False
-        }).ilike("fuente", "%Euskadi%").execute()
+        supabase.rpc("reset_flags_euskadi").execute()
         print("Flags reseteados con éxito.")
     except Exception as e:
         print(f"Aviso al resetear flags: {e}")
@@ -221,6 +219,69 @@ def sincronizar_licitaciones_euskadi():
                         cpv = str(cpv_raw)
             except Exception as ex:
                 print(f"Error consultando detalle para {codigo_item}: {ex}")
+        # 2. Refuerzo mediante scraping HTML para importe y tipo de contrato
+        if enlace:
+            try:
+                headers_html = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                }
+
+                resp_html = requests.get(
+                    enlace,
+                    headers=headers_html,
+                    timeout=8
+                )
+
+                if resp_html.status_code == 200:
+                    soup = BeautifulSoup(resp_html.text, "html.parser")
+
+                    # Recorrer parejas <dt> (campo) y <dd> (valor)
+                    for dt in soup.find_all("dt"):
+                        dt_text = dt.get_text(strip=True).lower()
+                        dd = dt.find_next_sibling("dd")
+
+                        if not dd:
+                            continue
+
+                        dd_text = dd.get_text(strip=True)
+
+                        # Tipo de contrato
+                        if (
+                            "tipo de contrato" in dt_text
+                            and tipo_contrato == "No especificado"
+                        ):
+                            tipo_contrato = dd_text
+
+                        # Importe / Presupuesto base de licitación
+                        if (
+                            ("presupuesto" in dt_text or "importe" in dt_text)
+                            and importe == 0.0
+                        ):
+                            importe_parsed = limpiar_importe_html(dd_text)
+
+                            if importe_parsed > 0:
+                                importe = importe_parsed
+
+                    # Respaldo del importe buscando directamente en los <dd>
+                    if importe == 0.0:
+                        for dd in soup.find_all("dd"):
+                            txt_dd = dd.get_text(strip=True)
+
+                            if re.match(
+                                r'^\d{1,3}(\.\d{3})*(,\d+)?$',
+                                txt_dd
+                            ):
+                                val = limpiar_importe_html(txt_dd)
+
+                                if val > 100:
+                                    importe = val
+                                    break
+
+            except Exception as html_ex:
+                print(
+                    f"Aviso: No se pudo hacer scraping web complementario "
+                    f"en {enlace}: {html_ex}"
+                )
 
         organo_str = organo_raw
         organo_base = normalizar_organo(organo_raw)
