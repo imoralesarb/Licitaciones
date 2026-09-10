@@ -347,7 +347,7 @@ col0, col_tipo, col1, col2, col3 = st.columns(5)
 with col0:
     filtro_fuente = st.multiselect(
         "🌐 Fuente",
-        ["Licitaciones Generales PLACSP", "Licitaciones Agregadas PLACSP", "TED", "PSCP Catalunya", "Euskadi", "Comunidad de Madrid", "Contratación Navarra", "Gobierno de La Rioja", "Galicia", "Junta de Andalucía"],
+        ["Licitaciones Generales PLACSP", "Licitaciones Agregadas PLACSP", "TED", "PSCP Catalunya", "Euskadi", "Comunidad de Madrid", "Contratación Navarra", "Gobierno de La Rioja", "Galicia", "Andalucía"],
         default=[],
         key="filtro_fuente",
     )
