@@ -67,6 +67,52 @@ def normalizar_organo(texto):
     texto = re.sub(r'[^a-z0-9\s]', '', texto)
     return re.sub(r'\s+', ' ', texto)
 
+def normalizar_fuentes(fuente):
+    """Convierte la cadena de fuentes en una lista limpia."""
+    if not fuente:
+        return []
+
+    return [
+        f.strip()
+        for f in str(fuente).split(",")
+        if f.strip()
+    ]
+
+
+def contiene_fuente(fuente_actual, nombre_fuente):
+    """Comprueba si una fuente concreta está presente."""
+    fuentes = normalizar_fuentes(fuente_actual)
+
+    return any(
+        f.casefold() == nombre_fuente.casefold()
+        for f in fuentes
+    )
+
+
+def añadir_fuente(fuente_actual, nombre_fuente):
+    """Añade una fuente sin duplicarla."""
+    fuentes = normalizar_fuentes(fuente_actual)
+
+    if not any(
+        f.casefold() == nombre_fuente.casefold()
+        for f in fuentes
+    ):
+        fuentes.append(nombre_fuente)
+
+    return ", ".join(fuentes)
+
+
+def quitar_fuente(fuente_actual, nombre_fuente):
+    """Elimina únicamente una fuente concreta."""
+    fuentes = normalizar_fuentes(fuente_actual)
+
+    fuentes = [
+        f for f in fuentes
+        if f.casefold() != nombre_fuente.casefold()
+    ]
+
+    return ", ".join(fuentes)
+
 def _texto(el, xpath, ns=NS):
     nodo = el.find(xpath, ns)
     return nodo.text.strip() if nodo is not None and nodo.text else None
@@ -396,24 +442,148 @@ def sincronizar_licitaciones_madrid():
             .ilike("fuente", "%Comunidad de Madrid%")
             .execute()
         )
+    
         ids_a_borrar = []
+        registros_a_actualizar = []
+    
         for item in todos_db.data:
+    
             f_fin = item.get("fecha_fin")
-            if f_fin and f_fin != "No especificada":
-                try:
-                    f_cierre = datetime.strptime(f_fin, "%Y-%m-%d").date()
-                    if f_cierre < hoy:
-                        ids_a_borrar.append(item["id"])
-                except ValueError:
-                    pass
-
+    
+            if not f_fin or f_fin == "No especificada":
+                continue
+    
+            try:
+                f_cierre = datetime.strptime(
+                    f_fin,
+                    "%Y-%m-%d"
+                ).date()
+            except ValueError:
+                continue
+    
+            if f_cierre < hoy:
+    
+                fuente_actual = str(
+                    item.get("fuente") or ""
+                )
+    
+                fuentes = normalizar_fuentes(
+                    fuente_actual
+                )
+    
+                # --------------------------------------------
+                # MADRID ES LA ÚNICA FUENTE
+                # --------------------------------------------
+                if (
+                    len(fuentes) == 1
+                    and contiene_fuente(
+                        fuente_actual,
+                        "Comunidad de Madrid"
+                    )
+                ):
+                    ids_a_borrar.append(
+                        item["id"]
+                    )
+    
+                # --------------------------------------------
+                # HAY OTRAS FUENTES
+                # --------------------------------------------
+                elif contiene_fuente(
+                    fuente_actual,
+                    "Comunidad de Madrid"
+                ):
+                    nueva_fuente = quitar_fuente(
+                        fuente_actual,
+                        "Comunidad de Madrid"
+                    )
+    
+                    registros_a_actualizar.append(
+                        (
+                            item["id"],
+                            nueva_fuente
+                        )
+                    )
+    
+        # ====================================================
+        # BORRAR LAS QUE SOLO SON DE MADRID
+        # ====================================================
+    
         if ids_a_borrar:
-            for i in range(0, len(ids_a_borrar), 50):
-                lote_ids = ids_a_borrar[i:i + 50]
-                supabase.table("licitaciones").delete().in_("id", lote_ids).execute()
-            print(f"Eliminadas {len(ids_a_borrar)} licitaciones caducadas de Supabase.")
+    
+            for i in range(
+                0,
+                len(ids_a_borrar),
+                50
+            ):
+    
+                lote_ids = ids_a_borrar[
+                    i:i + 50
+                ]
+    
+                (
+                    supabase
+                    .table("licitaciones")
+                    .delete()
+                    .in_(
+                        "id",
+                        lote_ids
+                    )
+                    .execute()
+                )
+    
+            print(
+                f"Eliminadas {len(ids_a_borrar)} "
+                f"licitaciones caducadas cuya única "
+                f"fuente era Comunidad de Madrid."
+            )
+    
+        # ====================================================
+        # QUITAR SOLO MADRID DE LAS FUENTES COMBINADAS
+        # ====================================================
+    
+        for (
+            registro_id,
+            nueva_fuente
+        ) in registros_a_actualizar:
+    
+            try:
+    
+                (
+                    supabase
+                    .table("licitaciones")
+                    .update({
+                        "fuente": nueva_fuente
+                    })
+                    .eq(
+                        "id",
+                        registro_id
+                    )
+                    .execute()
+                )
+    
+            except Exception as e:
+    
+                print(
+                    f"Error quitando fuente Madrid "
+                    f"del registro {registro_id}: {e}"
+                )
+    
+        if registros_a_actualizar:
+    
+            print(
+                f"Quitada la fuente Comunidad de Madrid "
+                f"de {len(registros_a_actualizar)} "
+                f"licitaciones caducadas que tenían "
+                f"otras fuentes."
+            )
+    
     except Exception as e:
-        print(f"Error en la limpieza de caducadas: {e}")
+    
+        print(
+            f"Error en la limpieza de caducadas: {e}"
+        )
+
+
 
     # ========================================================
     # 4. ESTADÍSTICAS
