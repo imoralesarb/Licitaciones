@@ -1096,14 +1096,14 @@ def sincronizar_licitaciones_euskadi():
     # ========================================================
     # 4. LIMPIEZA AUTOMÁTICA DE CADUCADAS
     # ========================================================
-
+    
     try:
-
+    
         todos_db = (
             supabase
             .table("licitaciones")
             .select(
-                "id, enlace, fecha_fin"
+                "id, enlace, fecha_fin, fuente"
             )
             .ilike(
                 "fuente",
@@ -1111,48 +1111,94 @@ def sincronizar_licitaciones_euskadi():
             )
             .execute()
         )
-
+    
         ids_a_borrar = []
-
+        ids_a_actualizar = []
+    
         for item in todos_db.data:
-
-            f_fin = item.get(
-                "fecha_fin"
-            )
-
+    
+            f_fin = item.get("fecha_fin")
+    
             if (
-                f_fin
-                and f_fin != "No especificada"
+                not f_fin
+                or f_fin == "No especificada"
             ):
-
-                try:
-
-                    f_cierre = datetime.strptime(
-                        f_fin,
-                        "%Y-%m-%d"
-                    ).date()
-
-                    if f_cierre < hoy_date:
-
-                        ids_a_borrar.append(
-                            item["id"]
+                continue
+    
+            try:
+    
+                f_cierre = datetime.strptime(
+                    f_fin,
+                    "%Y-%m-%d"
+                ).date()
+    
+            except ValueError:
+    
+                continue
+    
+            if f_cierre < hoy_date:
+    
+                fuente_actual = str(
+                    item.get("fuente") or ""
+                )
+    
+                fuentes = normalizar_fuentes(
+                    fuente_actual
+                )
+    
+                # ------------------------------------------
+                # Euskadi es la única fuente
+                # ------------------------------------------
+    
+                if (
+                    len(fuentes) == 1
+                    and contiene_fuente(
+                        fuente_actual,
+                        FUENTE_EUSKADI
+                    )
+                ):
+    
+                    ids_a_borrar.append(
+                        item["id"]
+                    )
+    
+                # ------------------------------------------
+                # Hay otras fuentes
+                # ------------------------------------------
+    
+                elif contiene_fuente(
+                    fuente_actual,
+                    FUENTE_EUSKADI
+                ):
+    
+                    nueva_fuente = quitar_fuente(
+                        fuente_actual,
+                        FUENTE_EUSKADI
+                    )
+    
+                    ids_a_actualizar.append(
+                        (
+                            item["id"],
+                            nueva_fuente
                         )
-
-                except ValueError:
-                    pass
-
+                    )
+    
+        # ----------------------------------------------
+        # Borrar registros cuya única fuente es Euskadi
+        # ----------------------------------------------
+    
         if ids_a_borrar:
-
+    
             for i in range(
                 0,
                 len(ids_a_borrar),
                 50
             ):
-
+    
                 lote_ids = ids_a_borrar[
                     i:i + 50
                 ]
-
+    
                 (
                     supabase
                     .table("licitaciones")
@@ -1163,19 +1209,59 @@ def sincronizar_licitaciones_euskadi():
                     )
                     .execute()
                 )
-
+    
             print(
                 f"Eliminadas {len(ids_a_borrar)} "
-                "licitaciones caducadas de Supabase."
+                f"licitaciones caducadas cuya única "
+                f"fuente era Euskadi."
             )
-
+    
+        # ----------------------------------------------
+        # Quitar solo Euskadi de las fuentes combinadas
+        # ----------------------------------------------
+    
+        for (
+            registro_id,
+            nueva_fuente
+        ) in ids_a_actualizar:
+    
+            try:
+    
+                (
+                    supabase
+                    .table("licitaciones")
+                    .update({
+                        "fuente": nueva_fuente
+                    })
+                    .eq(
+                        "id",
+                        registro_id
+                    )
+                    .execute()
+                )
+    
+            except Exception as e:
+    
+                print(
+                    f"Error quitando fuente Euskadi "
+                    f"del registro {registro_id}: {e}"
+                )
+    
+        if ids_a_actualizar:
+    
+            print(
+                f"Quitada la fuente Euskadi de "
+                f"{len(ids_a_actualizar)} licitaciones "
+                f"caducadas que tenían otras fuentes."
+            )
+    
     except Exception as e:
-
+    
         print(
             "Error en la limpieza de caducadas: "
             f"{e}"
         )
-
+    
     # ========================================================
     # 5. ESTADÍSTICAS
     # ========================================================
