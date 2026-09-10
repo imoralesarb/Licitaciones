@@ -423,7 +423,7 @@ col_fecha_fin, col_rango = st.columns([1, 2])
 with col_fecha_fin:
     fecha_cierre_tope = st.date_input(
         "⏳ Fecha fin de presentación (Mínima)",
-        value=date(2026, 3, 1),
+        value=date.today() - timedelta(days=1),
         key="fecha_cierre_tope"
     )
 
@@ -442,7 +442,7 @@ with col_rango:
     with col_hasta:
         f_fin = st.date_input(
             "📅 Rango publicación (Hasta)",
-            value=date(2026, 12, 31),
+            value=date(2100, 12, 31),
             key="f_fin"
         )
         
