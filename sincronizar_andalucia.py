@@ -27,7 +27,6 @@ import time
 import re
 
 import requests
-from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from sentence_transformers import SentenceTransformer
 
@@ -335,25 +334,25 @@ def extraer_fecha(valor):
 
 def formatear_fecha_supabase(fecha):
     """
-    Convierte datetime al formato utilizado por Supabase.
+    Convierte datetime al formato utilizado por Supabase,
+    guardando únicamente la fecha, sin hora.
     """
 
     if fecha is None:
         return None
 
-    if isinstance(fecha, date) and not isinstance(
-        fecha,
-        datetime
-    ):
+    if isinstance(fecha, datetime):
+        return fecha.strftime("%Y-%m-%d")
 
-        fecha = datetime.combine(
-            fecha,
-            datetime.min.time()
-        )
+    if isinstance(fecha, date):
+        return fecha.strftime("%Y-%m-%d")
 
-    return fecha.strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    fecha_convertida = extraer_fecha(fecha)
+
+    if fecha_convertida is None:
+        return None
+
+    return fecha_convertida.strftime("%Y-%m-%d")
 
 
 # ============================================================
@@ -601,230 +600,79 @@ def limpiar_lugar_ejecucion(lugar):
 # 11. CPV
 # ============================================================
 
-def extraer_cpv(cpv):
+def extraer_cpv(source):
     """
-    Extrae únicamente el código numérico CPV.
+    Extrae únicamente los códigos CPV del campo
+    "codigosCpv" de Elasticsearch.
 
     Ejemplo:
-        "50850000-8 Servicios de reparación y mantenimiento de mobiliario"
-        -> "50850000-8"
+        {
+            "codigo": "50850000-8",
+            "denominacion": "Servicios de reparación..."
+        }
 
-    Si hay varios CPV, devuelve todos separados por coma.
+    Resultado:
+        "50850000-8"
+
+    Si hay varios CPV:
+        "50850000-8, 30213100-6"
     """
 
-    if cpv is None:
+    if not isinstance(source, dict):
         return None
 
-    # --------------------------------------------------------
-    # Si es una lista
-    # --------------------------------------------------------
-
-    if isinstance(cpv, list):
-
-        valores = []
-
-        for elemento in cpv:
-
-            valor = extraer_cpv(elemento)
-
-            if valor:
-                valores.append(valor)
-
-        resultado = []
-
-        for valor in valores:
-
-            for codigo in valor.split(","):
-
-                codigo = codigo.strip()
-
-                if codigo and codigo not in resultado:
-                    resultado.append(codigo)
-
-        return ", ".join(resultado) if resultado else None
-
-    # --------------------------------------------------------
-    # Si es un diccionario
-    # --------------------------------------------------------
-
-    if isinstance(cpv, dict):
-
-        valores = []
-
-        for clave, valor in cpv.items():
-
-            if valor is None:
-                continue
-
-            extraido = extraer_cpv(valor)
-
-            if extraido:
-                valores.append(extraido)
-
-        resultado = []
-
-        for valor in valores:
-
-            for codigo in valor.split(","):
-
-                codigo = codigo.strip()
-
-                if codigo and codigo not in resultado:
-                    resultado.append(codigo)
-
-        return ", ".join(resultado) if resultado else None
-
-    # --------------------------------------------------------
-    # Si es texto
-    # --------------------------------------------------------
-
-    texto = limpiar_texto(cpv)
-
-    if not texto:
-        return None
-
-    # Busca códigos CPV del tipo:
-    # 50850000-8
-    # 30213100-6
-    # 45210000-2
-
-    codigos = re.findall(
-        r"\b\d{8}-\d\b",
-        texto
+    cpv_raw = source.get(
+        "codigosCpv"
     )
 
-    if not codigos:
+    if not isinstance(
+        cpv_raw,
+        list
+    ):
         return None
 
-    # Eliminar duplicados manteniendo el orden
+    codigos = []
 
-    resultado = []
+    for elemento in cpv_raw:
 
-    for codigo in codigos:
-
-        if codigo not in resultado:
-            resultado.append(codigo)
-
-    return ", ".join(resultado)
-
-
-def extraer_cpv_html(codigo_expediente):
-    """
-    Extrae el código CPV directamente del HTML
-    de la página pública del expediente.
-
-    Ejemplo:
-        50850000-8 Servicios de reparación y mantenimiento de mobiliario
-        -> 50850000-8
-    """
-
-    enlace = construir_enlace(
-        codigo_expediente
-    )
-
-    if not enlace:
-        return None
-
-    try:
-
-        respuesta = session.get(
-            enlace,
-            timeout=60
-        )
-
-        respuesta.raise_for_status()
-
-    except requests.RequestException as e:
-
-        print(
-            "    [AVISO] No se pudo consultar "
-            f"el HTML para CPV: {e}"
-        )
-
-        return None
-
-    try:
-
-        soup = BeautifulSoup(
-            respuesta.text,
-            "html.parser"
-        )
-
-    except Exception as e:
-
-        print(
-            "    [AVISO] No se pudo interpretar "
-            f"el HTML para CPV: {e}"
-        )
-
-        return None
-
-    # --------------------------------------------------------
-    # Buscar los bloques de información
-    # --------------------------------------------------------
-
-    bloques = soup.select(
-        ".block"
-    )
-
-    for bloque in bloques:
-
-        etiqueta = bloque.select_one(
-            ".field__label"
-        )
-
-        if not etiqueta:
+        if not isinstance(
+            elemento,
+            dict
+        ):
             continue
 
-        texto_etiqueta = normalizar_texto(
-            etiqueta.get_text(
-                " ",
-                strip=True
-            )
+        codigo = elemento.get(
+            "codigo"
         )
 
-        # Buscamos exactamente:
-        # Clasificación CPV
-
-        if texto_etiqueta != "clasificacion cpv":
+        if codigo is None:
             continue
 
-        texto_bloque = bloque.get_text(
-            " ",
-            strip=True
+        codigo = limpiar_texto(
+            codigo
         )
 
-        # Extraer SOLO códigos CPV.
-        #
-        # Ejemplo:
-        # 50850000-8 Servicios de reparación...
-        #
-        # Resultado:
-        # 50850000-8
+        # Nos aseguramos de guardar únicamente
+        # códigos CPV del formato 8 dígitos + guion + dígito.
 
-        codigos = re.findall(
+        coincidencias = re.findall(
             r"\b\d{8}-\d\b",
-            texto_bloque
+            codigo
         )
 
-        if not codigos:
-            return None
+        for codigo_extraido in coincidencias:
 
-        resultado = []
+            if codigo_extraido not in codigos:
 
-        for codigo in codigos:
-
-            if codigo not in resultado:
-
-                resultado.append(
-                    codigo
+                codigos.append(
+                    codigo_extraido
                 )
 
-        return ", ".join(
-            resultado
-        )
-
-    return None
+    return (
+        ", ".join(codigos)
+        if codigos
+        else None
+    )
 
 
 # ============================================================
@@ -1659,26 +1507,17 @@ def hay_cambios_reales(
             campo
         )
 
-        if isinstance(
-            valor_nuevo,
-            (datetime, date)
-        ):
+        if campo in {
+            "fecha",
+            "fecha_fin"
+        }:
 
-            valor_nuevo = (
-                formatear_fecha_supabase(
-                    valor_nuevo
-                )
+            valor_nuevo = formatear_fecha_supabase(
+                valor_nuevo
             )
 
-        if isinstance(
-            valor_antiguo,
-            (datetime, date)
-        ):
-
-            valor_antiguo = (
-                formatear_fecha_supabase(
-                    valor_antiguo
-                )
+            valor_antiguo = formatear_fecha_supabase(
+                valor_antiguo
             )
 
         if valores_diferentes(
@@ -1845,29 +1684,26 @@ def extraer_datos_detalle(
     # CPV
     # --------------------------------------------------------
 
-    # Primero se intenta obtener el CPV directamente
-    # desde el HTML público del expediente.
+    # El CPV está directamente disponible en
+    # Elasticsearch dentro de "codigosCpv".
+    #
+    # Se extrae únicamente el código, sin la denominación.
+    #
+    # Ejemplo:
+    #
+    # "codigosCpv": [
+    #     {
+    #         "codigo": "50850000-8",
+    #         "denominacion": "Servicios de reparación..."
+    #     }
+    # ]
+    #
+    # Resultado:
+    # "50850000-8"
 
-    cpv = extraer_cpv_html(
-        codigo_expediente
+    cpv = extraer_cpv(
+        source
     )
-
-    # Si no se encuentra en el HTML, se intenta
-    # obtener como alternativa desde Elasticsearch.
-
-    if cpv is None:
-
-        cpv_raw = obtener_valor(
-            source,
-            "cpv",
-            "clasificacionCPV",
-            "clasificacionCpv",
-            "codigoCPV"
-        )
-
-        cpv = extraer_cpv(
-            cpv_raw
-        )
 
     # --------------------------------------------------------
     # Fecha límite de presentación
@@ -2400,9 +2236,10 @@ def main():
             f"Expediente: {codigo}"
         )
 
+        # Fecha SIN hora
         print(
             "    Fecha publicación: "
-            f"{formatear_fecha_supabase(fecha_publicacion)}"
+            f"{fecha_publicacion.strftime('%Y-%m-%d')}"
         )
 
         # ====================================================
