@@ -1,4 +1,4 @@
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 import os
 import time
 import re
@@ -27,14 +27,7 @@ supabase: Client = create_client(
     SUPABASE_KEY
 )
 
-print(
-    "Cargando modelo de IA (multilingual-e5-small)..."
-)
-
-encoder = SentenceTransformer(
-    "intfloat/multilingual-e5-small",
-    device="cpu"
-)
+FUENTE_GALICIA = "Galicia"
 
 URL_LISTADO_GALICIA = (
     "https://www.contratosdegalicia.gal/"
@@ -45,7 +38,21 @@ BASE_URL_GALICIA = (
     "https://www.contratosdegalicia.gal"
 )
 
-FUENTE_GALICIA = "Galicia"
+
+# ============================================================
+# MODELO DE EMBEDDINGS
+# ============================================================
+
+print(
+    "Cargando modelo de IA (multilingual-e5-small)..."
+)
+
+encoder = SentenceTransformer(
+    "intfloat/multilingual-e5-small",
+    device="cpu"
+)
+
+print("Modelo cargado.")
 
 
 # ============================================================
@@ -64,12 +71,16 @@ retries = Retry(
         503,
         504
     ],
-    allowed_methods=["GET"]
+    allowed_methods=[
+        "GET"
+    ]
 )
 
 session.mount(
     "https://",
-    HTTPAdapter(max_retries=retries)
+    HTTPAdapter(
+        max_retries=retries
+    )
 )
 
 session.headers.update({
@@ -90,7 +101,7 @@ session.headers.update({
 
 
 # ============================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES GENERALES
 # ============================================================
 
 def normalizar_texto(texto):
@@ -118,7 +129,7 @@ def normalizar_texto(texto):
 
 
 def normalizar_organo(texto):
-    """Normaliza el órgano para detectar duplicados."""
+    """Normaliza un órgano para comparar duplicados."""
 
     if not texto:
         return ""
@@ -127,7 +138,6 @@ def normalizar_organo(texto):
         texto
     ).lower().strip()
 
-    # Eliminar acentos
     texto = unicodedata.normalize(
         "NFD",
         texto
@@ -139,23 +149,27 @@ def normalizar_organo(texto):
         if unicodedata.category(c) != "Mn"
     )
 
-    # Eliminar caracteres especiales
     texto = re.sub(
         r"[^a-z0-9\s]",
         "",
         texto
     )
 
-    # Normalizar espacios
-    return re.sub(
+    texto = re.sub(
         r"\s+",
         " ",
         texto
-    ).strip()
+    )
 
+    return texto.strip()
+
+
+# ============================================================
+# FUNCIONES PARA FUENTES
+# ============================================================
 
 def normalizar_fuentes(fuente):
-    """Convierte la cadena de fuentes en una lista limpia."""
+    """Convierte la cadena de fuentes en una lista."""
 
     if not fuente:
         return []
@@ -171,7 +185,7 @@ def contiene_fuente(
     fuente_actual,
     nombre_fuente
 ):
-    """Comprueba si una fuente concreta está presente."""
+    """Comprueba si una fuente está presente."""
 
     fuentes = normalizar_fuentes(
         fuente_actual
@@ -210,7 +224,7 @@ def quitar_fuente(
     fuente_actual,
     nombre_fuente
 ):
-    """Elimina únicamente una fuente concreta."""
+    """Elimina solamente una fuente."""
 
     fuentes = normalizar_fuentes(
         fuente_actual
@@ -227,119 +241,12 @@ def quitar_fuente(
     )
 
 
-def limpiar_cpv(cpv_raw):
-    """Extrae los primeros 8 dígitos del CPV."""
+# ============================================================
+# FECHAS
+# ============================================================
 
-    if not cpv_raw:
-        return "No especificado"
-
-    cpv_str = normalizar_texto(
-        cpv_raw
-    )
-
-    if not cpv_str:
-        return "No especificado"
-
-    match = re.search(
-        r"(\d{8}(?:-\d)?)",
-        cpv_str
-    )
-
-    if match:
-        return match.group(1)
-
-    return cpv_str[:20]
-
-
-def parsear_importe(valor):
-    """
-    Convierte importes gallegos a float.
-
-    Ejemplos:
-        15.000,00
-        2.965906325E7
-        0,00
-        15000
-    """
-
-    if valor is None:
-        return 0.0
-
-    texto = normalizar_texto(
-        valor
-    )
-
-    if not texto:
-        return 0.0
-
-    texto = (
-        texto
-        .replace("€", "")
-        .replace("EUR", "")
-        .strip()
-    )
-
-    # Notación científica
-    if re.search(
-        r"[eE][+-]?\d+",
-        texto
-    ):
-        try:
-            return float(
-                texto.replace(",", ".")
-            )
-        except (
-            ValueError,
-            TypeError
-        ):
-            return 0.0
-
-    texto = texto.replace(
-        " ",
-        ""
-    )
-
-    # Formato europeo:
-    # 15.000,00 -> 15000.00
-    if "," in texto:
-
-        texto = texto.replace(
-            ".",
-            ""
-        )
-
-        texto = texto.replace(
-            ",",
-            "."
-        )
-
-    else:
-
-        partes = texto.split(".")
-
-        if len(partes) > 2:
-            texto = "".join(
-                partes
-            )
-
-    try:
-
-        return float(
-            texto
-        )
-
-    except (
-        ValueError,
-        TypeError
-    ):
-
-        return 0.0
-
-
-def parsear_fecha(
-    valor
-):
-    """Convierte una fecha de Galicia a date."""
+def parsear_fecha(valor):
+    """Convierte una fecha de Galicia a datetime."""
 
     if valor is None:
         return None
@@ -375,10 +282,8 @@ def parsear_fecha(
     return None
 
 
-def parsear_fecha_publicacion(
-    valor
-):
-    """Devuelve la fecha de publicación en formato YYYY-MM-DD."""
+def parsear_fecha_publicacion(valor):
+    """Devuelve YYYY-MM-DD."""
 
     fecha = parsear_fecha(
         valor
@@ -392,10 +297,8 @@ def parsear_fecha_publicacion(
     )
 
 
-def parsear_fecha_fin(
-    valor
-):
-    """Devuelve la fecha límite en formato YYYY-MM-DD."""
+def parsear_fecha_fin(valor):
+    """Devuelve la fecha de fin en YYYY-MM-DD."""
 
     fecha = parsear_fecha(
         valor
@@ -410,7 +313,233 @@ def parsear_fecha_fin(
 
 
 # ============================================================
-# EXTRAER CAMPOS DEL DETALLE
+# IMPORTE
+# ============================================================
+
+def parsear_importe(valor):
+    """
+    Convierte importes en formato gallego/español.
+
+    Ejemplos:
+        3.600.000,00 -> 3600000.00
+        15.000,00 -> 15000.00
+        0,00 -> 0.00
+    """
+
+    if valor is None:
+        return 0.0
+
+    texto = normalizar_texto(
+        valor
+    )
+
+    if not texto:
+        return 0.0
+
+    texto = (
+        texto
+        .replace("€", "")
+        .replace("EUR", "")
+    )
+
+    # Buscar únicamente la parte numérica
+    match = re.search(
+        r"[-+]?\d[\d\.,]*(?:[eE][-+]?\d+)?",
+        texto
+    )
+
+    if not match:
+        return 0.0
+
+    numero = match.group(
+        0
+    )
+
+    # Notación científica
+    if re.search(
+        r"[eE][-+]?\d+",
+        numero
+    ):
+
+        try:
+
+            return float(
+                numero.replace(
+                    ",",
+                    "."
+                )
+            )
+
+        except ValueError:
+
+            return 0.0
+
+    # Formato europeo:
+    # 3.600.000,00
+    if "," in numero:
+
+        numero = numero.replace(
+            ".",
+            ""
+        )
+
+        numero = numero.replace(
+            ",",
+            "."
+        )
+
+    # Varios puntos = separadores de miles
+    elif numero.count(".") > 1:
+
+        numero = numero.replace(
+            ".",
+            ""
+        )
+
+    try:
+
+        return float(
+            numero
+        )
+
+    except ValueError:
+
+        return 0.0
+
+
+# ============================================================
+# TIPO DE CONTRATO
+# ============================================================
+
+def mapear_tipo_contrato(tipo):
+    """
+    Convierte los tipos de Galicia al formato de la BBDD.
+    """
+
+    tipo = normalizar_texto(
+        tipo
+    )
+
+    if not tipo:
+        return "No especificado"
+
+    mapeo = {
+        "subministracións": "Suministro",
+        "subministracions": "Suministro",
+
+        "subministración": "Suministro",
+        "subministracion": "Suministro",
+
+        "servizos": "Servicios",
+        "servicios": "Servicios",
+        "servizo": "Servicios",
+        "servicio": "Servicios",
+
+        "concesión de servizos":
+            "Concesión de servicios",
+
+        "concesion de servizos":
+            "Concesión de servicios",
+
+        "concesión de servicios":
+            "Concesión de servicios",
+
+        "concesión de obras":
+            "Concesión de obras",
+
+        "concesion de obras":
+            "Concesión de obras",
+
+        "obras": "Obras"
+    }
+
+    return mapeo.get(
+        tipo.lower(),
+        tipo
+    )
+
+
+# ============================================================
+# LUGAR DE EJECUCIÓN
+# ============================================================
+
+def mapear_lugar_galicia(lugar):
+    """
+    Limpia NUTS de Galicia.
+
+    Ejemplos:
+        ES111 A Coruña -> A Coruña
+        ES112 Lugo -> Lugo
+        ES113 Ourense -> Ourense
+        ES114 Pontevedra -> Pontevedra
+        ES España -> se elimina
+    """
+
+    if not lugar:
+        return "No especificado"
+
+    texto = normalizar_texto(
+        lugar
+    )
+
+    # Separar posibles lugares
+    partes = [
+        p.strip()
+        for p in texto.split(",")
+        if p.strip()
+    ]
+
+    resultado = []
+
+    for parte in partes:
+
+        # Eliminar código NUTS:
+        # ES111 A Coruña -> A Coruña
+        parte_limpia = re.sub(
+            r"^ES\d{3}\s*",
+            "",
+            parte,
+            flags=re.IGNORECASE
+        ).strip()
+
+        # Eliminar ES España
+        if re.fullmatch(
+            r"ES\s+España",
+            parte_limpia,
+            flags=re.IGNORECASE
+        ):
+            continue
+
+        # Eliminar España sola
+        if parte_limpia.lower() == "españa":
+            continue
+
+        if parte_limpia:
+            resultado.append(
+                parte_limpia
+            )
+
+    # Eliminar duplicados
+    resultado_final = []
+
+    for lugar_limpio in resultado:
+
+        if lugar_limpio not in resultado_final:
+
+            resultado_final.append(
+                lugar_limpio
+            )
+
+    if not resultado_final:
+        return "No especificado"
+
+    return ", ".join(
+        resultado_final
+    )
+
+
+# ============================================================
+# EXTRAER <dt> + <dd>
 # ============================================================
 
 def extraer_dt_dd(
@@ -418,27 +547,38 @@ def extraer_dt_dd(
     etiqueta
 ):
     """
-    Busca una estructura:
+    Busca:
 
         <dt>Etiqueta</dt>
         <dd>Valor</dd>
     """
 
-    etiqueta_normalizada = normalizar_texto(
-        etiqueta
-    ).lower().rstrip(":")
+    etiqueta_normalizada = (
+        normalizar_texto(
+            etiqueta
+        )
+        .lower()
+        .rstrip(":")
+    )
 
-    for dt in soup.find_all("dt"):
+    for dt in soup.find_all(
+        "dt"
+    ):
 
-        texto_dt = normalizar_texto(
-            dt.get_text(
-                " ",
-                strip=True
+        texto_dt = (
+            normalizar_texto(
+                dt.get_text(
+                    " ",
+                    strip=True
+                )
             )
-        ).lower().rstrip(":")
+            .lower()
+            .rstrip(":")
+        )
 
         if texto_dt == etiqueta_normalizada:
 
+            # Primero hermano directo
             dd = dt.find_next_sibling(
                 "dd"
             )
@@ -452,15 +592,35 @@ def extraer_dt_dd(
                     )
                 )
 
+            # Fallback
+            siguiente = dt.find_next(
+                "dd"
+            )
+
+            if siguiente:
+
+                return normalizar_texto(
+                    siguiente.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
     return ""
 
+
+# ============================================================
+# EXTRAER ESTADO
+# ============================================================
 
 def extraer_estado(
     soup
 ):
     """Extrae el estado del procedimiento."""
 
-    for p in soup.find_all("p"):
+    for p in soup.find_all(
+        "p"
+    ):
 
         texto = normalizar_texto(
             p.get_text(
@@ -501,10 +661,14 @@ def extraer_estado(
     return ""
 
 
+# ============================================================
+# EXTRAER ÓRGANO
+# ============================================================
+
 def extraer_organo(
     soup
 ):
-    """Extrae el órgano de contratación."""
+    """Extrae el organismo de contratación."""
 
     organismo = soup.select_one(
         ".organismo .logo-texto"
@@ -535,6 +699,10 @@ def extraer_organo(
     return ""
 
 
+# ============================================================
+# EXTRAER CPV
+# ============================================================
+
 def extraer_cpv(
     soup
 ):
@@ -549,33 +717,26 @@ def extraer_cpv(
 
     cpvs = []
 
-    for td in panel.find_all(
-        "td"
-    ):
-
-        texto = normalizar_texto(
-            td.get_text(
-                " ",
-                strip=True
-            )
+    # Buscar códigos de 8 dígitos
+    texto_panel = normalizar_texto(
+        panel.get_text(
+            " ",
+            strip=True
         )
+    )
 
-        match = re.search(
-            r"\b(\d{8})\b",
-            texto
-        )
+    encontrados = re.findall(
+        r"\b\d{8}\b",
+        texto_panel
+    )
 
-        if match:
+    for codigo in encontrados:
 
-            codigo = match.group(
-                1
+        if codigo not in cpvs:
+
+            cpvs.append(
+                codigo
             )
-
-            if codigo not in cpvs:
-
-                cpvs.append(
-                    codigo
-                )
 
     if not cpvs:
         return "No especificado"
@@ -585,10 +746,14 @@ def extraer_cpv(
     )
 
 
+# ============================================================
+# EXTRAER NUTS / LUGAR
+# ============================================================
+
 def extraer_nuts(
     soup
 ):
-    """Extrae las localizaciones NUT."""
+    """Extrae las localizaciones NUTS."""
 
     panel = soup.find(
         id="collapseNUT"
@@ -597,60 +762,75 @@ def extraer_nuts(
     if not panel:
         return "No especificado"
 
-    nuts = []
-
-    for tr in panel.find_all(
-        "tr"
-    ):
-
-        celdas = tr.find_all(
-            "td"
+    texto = normalizar_texto(
+        panel.get_text(
+            " ",
+            strip=True
         )
-
-        if not celdas:
-            continue
-
-        valores = []
-
-        for td in celdas:
-
-            valor = normalizar_texto(
-                td.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if valor:
-                valores.append(
-                    valor
-                )
-
-        if valores:
-
-            texto = " ".join(
-                valores
-            )
-
-            if texto not in nuts:
-
-                nuts.append(
-                    texto
-                )
-
-    if not nuts:
-        return "No especificado"
-
-    return ", ".join(
-        nuts
     )
 
+    if not texto:
+        return "No especificado"
+
+    # Buscar patrones como:
+    # ES111 A Coruña
+    # ES113 Ourense
+    # ES España
+    encontrados = re.findall(
+        r"ES\d{3}\s+[^ES]+?(?=\s+ES\d{3}\s+|\s+ES\s+España|$)",
+        texto,
+        flags=re.IGNORECASE
+    )
+
+    if encontrados:
+
+        lugares = []
+
+        for encontrado in encontrados:
+
+            encontrado = normalizar_texto(
+                encontrado
+            )
+
+            if encontrado not in lugares:
+
+                lugares.append(
+                    encontrado
+                )
+
+        if lugares:
+
+            return ", ".join(
+                lugares
+            )
+
+    # Fallback: buscar códigos NUTS directamente
+    patrones = re.findall(
+        r"ES\d{3}\s+[A-Za-zÁÉÍÓÚáéíóúÑñÜüÀÈÌÒÙàèìòùÇç ]+",
+        texto
+    )
+
+    if patrones:
+
+        return ", ".join(
+            dict.fromkeys(
+                normalizar_texto(
+                    p
+                )
+                for p in patrones
+            )
+        )
+
+    return texto
+
+
+# ============================================================
+# ENLACE
+# ============================================================
 
 def construir_enlace_galicia(
     codigo
 ):
-    """Construye el enlace canónico de la licitación."""
-
     return (
         f"{BASE_URL_GALICIA}/"
         f"licitacion?N={codigo}"
@@ -658,14 +838,14 @@ def construir_enlace_galicia(
 
 
 # ============================================================
-# DESCARGAR DETALLE DE UNA LICITACIÓN
+# EXTRAER DETALLE
 # ============================================================
 
 def extraer_detalle_galicia(
     codigo,
     fecha_publicacion_lista=None
 ):
-    """Descarga y procesa el detalle de una licitación."""
+    """Descarga y procesa el detalle."""
 
     enlace = construir_enlace_galicia(
         codigo
@@ -695,20 +875,20 @@ def extraer_detalle_galicia(
     )
 
     # --------------------------------------------------------
-    # ÓRGANO
-    # --------------------------------------------------------
-
-    organo = extraer_organo(
-        soup
-    )
-
-    # --------------------------------------------------------
     # TÍTULO
     # --------------------------------------------------------
 
     titulo = extraer_dt_dd(
         soup,
         "Obxecto"
+    )
+
+    # --------------------------------------------------------
+    # ÓRGANO
+    # --------------------------------------------------------
+
+    organo = extraer_organo(
+        soup
     )
 
     # --------------------------------------------------------
@@ -720,11 +900,9 @@ def extraer_detalle_galicia(
         "Tipo de contrato"
     )
 
-    if not tipo_contrato:
-
-        tipo_contrato = (
-            "No especificado"
-        )
+    tipo_contrato = mapear_tipo_contrato(
+        tipo_contrato
+    )
 
     # --------------------------------------------------------
     # PRESUPUESTO BASE
@@ -735,7 +913,7 @@ def extraer_detalle_galicia(
         "Orzamento base de licitación"
     )
 
-    importe = parsear_importe(
+    importe_presupuesto = parsear_importe(
         presupuesto_texto
     )
 
@@ -748,21 +926,41 @@ def extraer_detalle_galicia(
         "Valor estimado"
     )
 
-    valor_estimado = parsear_importe(
+    importe_estimado = parsear_importe(
         valor_estimado_texto
     )
 
-    # Si el presupuesto base no existe,
-    # usamos el valor estimado como respaldo.
-    if (
-        importe == 0.0
-        and valor_estimado > 0
-    ):
+    # --------------------------------------------------------
+    # IMPORTE FINAL
+    # --------------------------------------------------------
+    #
+    # Si existe presupuesto base > 0:
+    #     usar presupuesto base
+    #
+    # Si no:
+    #     usar valor estimado
+    #
+    # Esto soluciona casos como:
+    #
+    # Valor estimado
+    # 3.600.000,00 sen IVE
+    #
+    # --------------------------------------------------------
 
-        importe = valor_estimado
+    if importe_presupuesto > 0:
+
+        importe = importe_presupuesto
+
+    elif importe_estimado > 0:
+
+        importe = importe_estimado
+
+    else:
+
+        importe = 0.0
 
     # --------------------------------------------------------
-    # FECHA DE PUBLICACIÓN
+    # FECHA PUBLICACIÓN
     # --------------------------------------------------------
 
     fecha_publicacion_texto = extraer_dt_dd(
@@ -783,8 +981,6 @@ def extraer_detalle_galicia(
         )
     )
 
-    # Si no se encuentra en el detalle,
-    # utilizamos la fecha del listado.
     if not fecha_publicacion:
 
         fecha_publicacion = (
@@ -815,11 +1011,15 @@ def extraer_detalle_galicia(
     )
 
     # --------------------------------------------------------
-    # LUGAR / NUT
+    # LUGAR
     # --------------------------------------------------------
 
-    lugar_ejecucion = extraer_nuts(
+    lugar_raw = extraer_nuts(
         soup
+    )
+
+    lugar_ejecucion = mapear_lugar_galicia(
+        lugar_raw
     )
 
     # --------------------------------------------------------
@@ -829,10 +1029,6 @@ def extraer_detalle_galicia(
     estado = extraer_estado(
         soup
     )
-
-    # --------------------------------------------------------
-    # DATOS
-    # --------------------------------------------------------
 
     return {
         "enlace": enlace,
@@ -849,13 +1045,10 @@ def extraer_detalle_galicia(
 
 
 # ============================================================
-# DESCARGAR LISTADO DE GALICIA
+# OBTENER LISTADO DE GALICIA
 # ============================================================
 
 def obtener_registros_galicia():
-    """
-    Obtiene el JSON completo de resSearch.
-    """
 
     print(
         "\nConsultando publicaciones de Galicia..."
@@ -933,8 +1126,7 @@ def obtener_registros_galicia():
     ):
 
         print(
-            "El contenido de resSearch "
-            "no es una lista."
+            "resSearch no contiene una lista."
         )
 
         return []
@@ -948,13 +1140,13 @@ def obtener_registros_galicia():
 
 
 # ============================================================
-# ESTADOS A EXCLUIR
+# ESTADOS EXCLUIDOS
 # ============================================================
 
 def estado_no_valido(
     estado
 ):
-    """Comprueba si el procedimiento está cerrado."""
+    """Determina si el procedimiento está cerrado."""
 
     if not estado:
         return False
@@ -991,7 +1183,6 @@ def construir_texto_completo(
     importe,
     cpv
 ):
-    """Construye el texto utilizado para el embedding."""
 
     return (
         f"passage: Título: {titulo}. "
@@ -1004,7 +1195,7 @@ def construir_texto_completo(
 
 
 # ============================================================
-# SINCRONIZACIÓN GALICIA
+# SINCRONIZACIÓN
 # ============================================================
 
 def sincronizar_licitaciones_galicia():
@@ -1038,7 +1229,18 @@ def sincronizar_licitaciones_galicia():
     )
 
     # ========================================================
-    # 1. DESCARGAR DATOS DE GALICIA
+    # CONTADORES
+    # ========================================================
+
+    nuevas = 0
+    actualizadas = 0
+    ya_existentes_sin_cambios = 0
+    duplicadas = 0
+    descartadas_estado = 0
+    errores = 0
+
+    # ========================================================
+    # 1. OBTENER LISTADO
     # ========================================================
 
     results = obtener_registros_galicia()
@@ -1046,14 +1248,18 @@ def sincronizar_licitaciones_galicia():
     if not results:
 
         print(
-            "No se han obtenido registros de Galicia."
+            "No se han obtenido publicaciones."
         )
 
         return
 
     # ========================================================
-    # 2. CARGAR REGISTROS EXISTENTES DE SUPABASE
+    # 2. CARGAR BBDD
     # ========================================================
+
+    print(
+        "Cargando licitaciones existentes..."
+    )
 
     try:
 
@@ -1076,9 +1282,9 @@ def sincronizar_licitaciones_galicia():
             existentes_resp.data or []
         ):
 
-            # ----------------------------------------------
-            # Mapa por enlace
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # MAPA POR ENLACE
+            # ------------------------------------------------
 
             enlace_item = item.get(
                 "enlace"
@@ -1090,12 +1296,14 @@ def sincronizar_licitaciones_galicia():
                     enlace_item
                 ] = item
 
-            # ----------------------------------------------
-            # Mapa por título + órgano
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # MAPA POR TÍTULO + ÓRGANO
+            # ------------------------------------------------
 
             titulo_item = str(
-                item.get("titulo") or ""
+                item.get(
+                    "titulo"
+                ) or ""
             ).strip().lower()
 
             organo_item = normalizar_organo(
@@ -1114,12 +1322,14 @@ def sincronizar_licitaciones_galicia():
                     )
                 )
 
-            # ----------------------------------------------
-            # Registros de Galicia con flags anteriores
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # FLAGS DE GALICIA
+            # ------------------------------------------------
 
             fuente_item = str(
-                item.get("fuente") or ""
+                item.get(
+                    "fuente"
+                ) or ""
             )
 
             if (
@@ -1143,20 +1353,20 @@ def sincronizar_licitaciones_galicia():
                 )
 
         print(
-            "Registros cargados desde Supabase para "
+            f"Registros cargados desde Supabase para "
             f"validación: {len(existentes_resp.data or [])}"
         )
 
     except Exception as e:
 
         print(
-            f"Error conectando con Supabase para lectura: {e}"
+            f"Error cargando BBDD: {e}"
         )
 
         return
 
     # ========================================================
-    # 2.1. RESETEAR ETIQUETAS ANTERIORES DE GALICIA
+    # 3. RESETEAR FLAGS
     # ========================================================
 
     if ids_flags_galicia:
@@ -1240,13 +1450,13 @@ def sincronizar_licitaciones_galicia():
 
                     else:
 
+                        reset_correcto = False
+
                         print(
                             f"  -> Error definitivo al "
-                            f"resetear el lote de etiquetas "
+                            f"resetear lote "
                             f"{num_lote_reset}."
                         )
-
-                        reset_correcto = False
 
             if not exito_lote:
                 continue
@@ -1268,25 +1478,17 @@ def sincronizar_licitaciones_galicia():
     else:
 
         print(
-            "No hay etiquetas anteriores de Galicia "
-            "que resetear."
+            "No hay etiquetas anteriores de Galicia que resetear."
         )
 
     # ========================================================
-    # 3. PROCESAR LICITACIONES
+    # 4. PROCESAR PUBLICACIONES
     # ========================================================
 
-    licitaciones_validas = []
+    licitaciones_nuevas = []
 
     enlaces_procesados_sesion = set()
-
     claves_procesadas_sesion = set()
-
-    nuevas = 0
-    actualizadas = 0
-    duplicadas = 0
-    errores = 0
-    descartadas_estado = 0
 
     for i, aviso in enumerate(
         results,
@@ -1318,6 +1520,7 @@ def sincronizar_licitaciones_galicia():
 
         pub_date = fecha_pub.date()
 
+        # Solo últimos 3 días
         if (
             pub_date < limite_fecha
             or pub_date > hoy_date
@@ -1338,9 +1541,8 @@ def sincronizar_licitaciones_galicia():
             codigo
         )
 
-        if (
-            enlace in enlaces_procesados_sesion
-        ):
+        if enlace in enlaces_procesados_sesion:
+
             continue
 
         enlaces_procesados_sesion.add(
@@ -1353,7 +1555,7 @@ def sincronizar_licitaciones_galicia():
         )
 
         # ----------------------------------------------------
-        # OBTENER DETALLE
+        # DETALLE
         # ----------------------------------------------------
 
         detalle = extraer_detalle_galicia(
@@ -1399,17 +1601,11 @@ def sincronizar_licitaciones_galicia():
                 )
             )
 
-        tipo_contrato = normalizar_texto(
+        tipo_contrato = mapear_tipo_contrato(
             detalle.get(
                 "tipo_contrato"
             )
         )
-
-        if not tipo_contrato:
-
-            tipo_contrato = (
-                "No especificado"
-            )
 
         importe = detalle.get(
             "importe",
@@ -1421,24 +1617,17 @@ def sincronizar_licitaciones_galicia():
             "No especificado"
         )
 
-        lugar_ejecucion = detalle.get(
-            "lugar_ejecucion",
-            "No especificado"
+        lugar_ejecucion = mapear_lugar_galicia(
+            detalle.get(
+                "lugar_ejecucion",
+                "No especificado"
+            )
         )
 
         fecha_fin = detalle.get(
             "fecha_fin",
             "No especificada"
         )
-
-        estado = detalle.get(
-            "estado",
-            ""
-        )
-
-        # ----------------------------------------------------
-        # FECHA DE PUBLICACIÓN
-        # ----------------------------------------------------
 
         fecha = detalle.get(
             "fecha"
@@ -1447,6 +1636,11 @@ def sincronizar_licitaciones_galicia():
         if not fecha:
 
             fecha = fecha_pub_formateada
+
+        estado = detalle.get(
+            "estado",
+            ""
+        )
 
         # ----------------------------------------------------
         # ESTADO
@@ -1466,7 +1660,7 @@ def sincronizar_licitaciones_galicia():
             continue
 
         # ----------------------------------------------------
-        # CLAVE DE DUPLICADO
+        # CLAVE DUPLICADO
         # ----------------------------------------------------
 
         titulo_normalizado = (
@@ -1475,10 +1669,8 @@ def sincronizar_licitaciones_galicia():
             .strip()
         )
 
-        organo_normalizado = (
-            normalizar_organo(
-                organo
-            )
+        organo_normalizado = normalizar_organo(
+            organo
         )
 
         clave_duplicado = (
@@ -1487,7 +1679,7 @@ def sincronizar_licitaciones_galicia():
         )
 
         # ====================================================
-        # 3.1. EXISTE POR ENLACE
+        # A. EXISTE POR ENLACE
         # ====================================================
 
         if enlace in registros_db:
@@ -1504,9 +1696,11 @@ def sincronizar_licitaciones_galicia():
 
             actualizar_datos = {}
 
-            # ----------------------------------------------
-            # Añadir Galicia como fuente
-            # ----------------------------------------------
+            cambios_reales = False
+
+            # ------------------------------------------------
+            # AÑADIR GALICIA COMO FUENTE
+            # ------------------------------------------------
 
             if not contiene_fuente(
                 fuente_actual,
@@ -1520,41 +1714,17 @@ def sincronizar_licitaciones_galicia():
                     FUENTE_GALICIA
                 )
 
-            # ----------------------------------------------
-            # Completar tipo de contrato
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # TÍTULO
+            # ------------------------------------------------
 
-            tipo_actual = normalizar_texto(
+            titulo_antiguo = normalizar_texto(
                 reg_antiguo.get(
-                    "tipo_contrato"
+                    "titulo"
                 )
             )
 
-            if (
-                not tipo_actual
-                or tipo_actual == "No especificado"
-            ) and (
-                tipo_contrato != "No especificado"
-            ):
-
-                actualizar_datos[
-                    "tipo_contrato"
-                ] = tipo_contrato
-
-            # ----------------------------------------------
-            # Detectar cambios reales
-            # ----------------------------------------------
-
-            cambios_reales = False
-
-            if (
-                normalizar_texto(
-                    reg_antiguo.get(
-                        "titulo"
-                    )
-                )
-                != titulo
-            ):
+            if titulo_antiguo != titulo:
 
                 actualizar_datos[
                     "titulo"
@@ -1562,14 +1732,17 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
-            if (
-                normalizar_texto(
-                    reg_antiguo.get(
-                        "organo"
-                    )
+            # ------------------------------------------------
+            # ÓRGANO
+            # ------------------------------------------------
+
+            organo_antiguo = normalizar_texto(
+                reg_antiguo.get(
+                    "organo"
                 )
-                != organo
-            ):
+            )
+
+            if organo_antiguo != organo:
 
                 actualizar_datos[
                     "organo"
@@ -1577,15 +1750,18 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
-            if (
-                normalizar_texto(
-                    reg_antiguo.get(
-                        "fecha"
-                    )
+            # ------------------------------------------------
+            # FECHA
+            # ------------------------------------------------
+
+            fecha_antigua = normalizar_texto(
+                reg_antiguo.get(
+                    "fecha"
                 )
-                != normalizar_texto(
-                    fecha
-                )
+            )
+
+            if fecha_antigua != normalizar_texto(
+                fecha
             ):
 
                 actualizar_datos[
@@ -1593,6 +1769,10 @@ def sincronizar_licitaciones_galicia():
                 ] = fecha
 
                 cambios_reales = True
+
+            # ------------------------------------------------
+            # IMPORTE
+            # ------------------------------------------------
 
             try:
 
@@ -1610,8 +1790,7 @@ def sincronizar_licitaciones_galicia():
                 importe_antiguo = 0.0
 
             if abs(
-                importe_antiguo
-                - importe
+                importe_antiguo - importe
             ) > 0.01:
 
                 actualizar_datos[
@@ -1620,12 +1799,20 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
+            # ------------------------------------------------
+            # TIPO CONTRATO
+            # ------------------------------------------------
+
+            tipo_antiguo = normalizar_texto(
+                reg_antiguo.get(
+                    "tipo_contrato"
+                )
+            )
+
             if (
                 tipo_contrato
-                and tipo_contrato
-                != "No especificado"
-                and tipo_contrato
-                != tipo_actual
+                and tipo_contrato != "No especificado"
+                and tipo_contrato != tipo_antiguo
             ):
 
                 actualizar_datos[
@@ -1634,7 +1821,11 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
-            cpv_actual = normalizar_texto(
+            # ------------------------------------------------
+            # CPV
+            # ------------------------------------------------
+
+            cpv_antiguo = normalizar_texto(
                 reg_antiguo.get(
                     "cpv"
                 )
@@ -1643,7 +1834,7 @@ def sincronizar_licitaciones_galicia():
             if (
                 cpv
                 and cpv != "No especificado"
-                and cpv != cpv_actual
+                and cpv != cpv_antiguo
             ):
 
                 actualizar_datos[
@@ -1652,7 +1843,11 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
-            lugar_actual = normalizar_texto(
+            # ------------------------------------------------
+            # LUGAR
+            # ------------------------------------------------
+
+            lugar_antiguo = normalizar_texto(
                 reg_antiguo.get(
                     "lugar_ejecucion"
                 )
@@ -1660,10 +1855,8 @@ def sincronizar_licitaciones_galicia():
 
             if (
                 lugar_ejecucion
-                and lugar_ejecucion
-                != "No especificado"
-                and lugar_ejecucion
-                != lugar_actual
+                and lugar_ejecucion != "No especificado"
+                and lugar_ejecucion != lugar_antiguo
             ):
 
                 actualizar_datos[
@@ -1672,7 +1865,11 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
-            fecha_fin_actual = normalizar_texto(
+            # ------------------------------------------------
+            # FECHA FIN
+            # ------------------------------------------------
+
+            fecha_fin_antigua = normalizar_texto(
                 reg_antiguo.get(
                     "fecha_fin"
                 )
@@ -1680,10 +1877,8 @@ def sincronizar_licitaciones_galicia():
 
             if (
                 fecha_fin
-                and fecha_fin
-                != "No especificada"
-                and fecha_fin
-                != fecha_fin_actual
+                and fecha_fin != "No especificada"
+                and fecha_fin != fecha_fin_antigua
             ):
 
                 actualizar_datos[
@@ -1692,9 +1887,9 @@ def sincronizar_licitaciones_galicia():
 
                 cambios_reales = True
 
-            # ----------------------------------------------
-            # Marcar actualización
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # FLAGS
+            # ------------------------------------------------
 
             actualizar_datos[
                 "es_novedad"
@@ -1704,9 +1899,9 @@ def sincronizar_licitaciones_galicia():
                 "es_actualizada"
             ] = cambios_reales
 
-            # ----------------------------------------------
-            # Regenerar embedding si cambió información
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # EMBEDDING SI HAY CAMBIOS
+            # ------------------------------------------------
 
             if cambios_reales:
 
@@ -1724,13 +1919,6 @@ def sincronizar_licitaciones_galicia():
                     )
                 )
 
-                importe_embedding = actualizar_datos.get(
-                    "importe",
-                    reg_antiguo.get(
-                        "importe"
-                    )
-                )
-
                 tipo_embedding = actualizar_datos.get(
                     "tipo_contrato",
                     reg_antiguo.get(
@@ -1738,17 +1926,24 @@ def sincronizar_licitaciones_galicia():
                     )
                 )
 
-                cpv_embedding = actualizar_datos.get(
-                    "cpv",
-                    reg_antiguo.get(
-                        "cpv"
-                    )
-                )
-
                 lugar_embedding = actualizar_datos.get(
                     "lugar_ejecucion",
                     reg_antiguo.get(
                         "lugar_ejecucion"
+                    )
+                )
+
+                importe_embedding = actualizar_datos.get(
+                    "importe",
+                    reg_antiguo.get(
+                        "importe"
+                    )
+                )
+
+                cpv_embedding = actualizar_datos.get(
+                    "cpv",
+                    reg_antiguo.get(
+                        "cpv"
                     )
                 )
 
@@ -1784,6 +1979,8 @@ def sincronizar_licitaciones_galicia():
                         f"de actualización: {e}"
                     )
 
+                    errores += 1
+
                 actualizadas += 1
 
                 print(
@@ -1793,18 +1990,22 @@ def sincronizar_licitaciones_galicia():
             elif "fuente" in actualizar_datos:
 
                 print(
-                    "  -> Añadida Galicia como fuente."
+                    "  -> Ya existía. Añadida Galicia como fuente."
                 )
+
+                ya_existentes_sin_cambios += 1
 
             else:
 
+                ya_existentes_sin_cambios += 1
+
                 print(
-                    "  -> Sin cambios."
+                    "  -> Ya existente, sin cambios."
                 )
 
-            # ----------------------------------------------
-            # Actualizar BBDD
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # ACTUALIZAR BBDD
+            # ------------------------------------------------
 
             if actualizar_datos:
 
@@ -1830,8 +2031,7 @@ def sincronizar_licitaciones_galicia():
                 except Exception as e:
 
                     print(
-                        f"  -> Error actualizando "
-                        f"registro existente: {e}"
+                        f"  -> Error actualizando registro: {e}"
                     )
 
                     errores += 1
@@ -1843,7 +2043,7 @@ def sincronizar_licitaciones_galicia():
             continue
 
         # ====================================================
-        # 3.2. EXISTE POR TÍTULO + ÓRGANO
+        # B. EXISTE POR TÍTULO + ÓRGANO
         # ====================================================
 
         if clave_duplicado in registros_existentes:
@@ -1921,8 +2121,8 @@ def sincronizar_licitaciones_galicia():
                     except Exception as e:
 
                         print(
-                            f"  -> Error añadiendo fuente "
-                            f"Galicia al duplicado: {e}"
+                            f"  -> Error añadiendo Galicia "
+                            f"como fuente: {e}"
                         )
 
                         errores += 1
@@ -1942,13 +2142,13 @@ def sincronizar_licitaciones_galicia():
             continue
 
         # ====================================================
-        # 3.3. DUPLICADO DENTRO DE ESTA EJECUCIÓN
+        # C. DUPLICADO EN ESTA EJECUCIÓN
         # ====================================================
 
         if clave_duplicado in claves_procesadas_sesion:
 
             print(
-                "  -> Duplicado dentro de la misma ejecución."
+                "  -> Duplicado dentro de esta ejecución."
             )
 
             duplicadas += 1
@@ -1956,7 +2156,7 @@ def sincronizar_licitaciones_galicia():
             continue
 
         # ====================================================
-        # 3.4. NUEVA LICITACIÓN
+        # D. NUEVA
         # ====================================================
 
         claves_procesadas_sesion.add(
@@ -1990,7 +2190,7 @@ def sincronizar_licitaciones_galicia():
 
             continue
 
-        elemento = {
+        nuevo_registro = {
             "titulo": titulo,
             "organo": organo,
             "fecha": fecha,
@@ -2007,15 +2207,14 @@ def sincronizar_licitaciones_galicia():
             "fuente": FUENTE_GALICIA
         }
 
-        licitaciones_validas.append(
-            elemento
+        licitaciones_nuevas.append(
+            nuevo_registro
         )
 
         nuevas += 1
 
         # ----------------------------------------------------
-        # MUY IMPORTANTE:
-        # actualizar también los mapas en memoria
+        # ACTUALIZAR MAPAS EN MEMORIA
         # ----------------------------------------------------
 
         registros_existentes.add(
@@ -2024,10 +2223,10 @@ def sincronizar_licitaciones_galicia():
 
         registros_db[
             enlace
-        ] = elemento
+        ] = nuevo_registro
 
     # ========================================================
-    # 4. LIMPIEZA AUTOMÁTICA DE CADUCADAS
+    # 5. LIMPIEZA DE CADUCADAS
     # ========================================================
 
     print(
@@ -2056,20 +2255,22 @@ def sincronizar_licitaciones_galicia():
             todos_db.data or []
         ):
 
-            f_fin = item.get(
+            fecha_fin_db = item.get(
                 "fecha_fin"
             )
 
             if (
-                not f_fin
-                or f_fin == "No especificada"
+                not fecha_fin_db
+                or fecha_fin_db == "No especificada"
             ):
                 continue
 
             try:
 
-                f_cierre = datetime.strptime(
-                    str(f_fin),
+                fecha_cierre = datetime.strptime(
+                    str(
+                        fecha_fin_db
+                    ),
                     "%Y-%m-%d"
                 ).date()
 
@@ -2077,7 +2278,7 @@ def sincronizar_licitaciones_galicia():
 
                 continue
 
-            if f_cierre < hoy_date:
+            if fecha_cierre < hoy_date:
 
                 fuente_actual = str(
                     item.get(
@@ -2089,9 +2290,9 @@ def sincronizar_licitaciones_galicia():
                     fuente_actual
                 )
 
-                # ------------------------------------------
-                # Galicia es la única fuente
-                # ------------------------------------------
+                # ------------------------------------------------
+                # GALICIA ES LA ÚNICA FUENTE
+                # ------------------------------------------------
 
                 if (
                     len(fuentes) == 1
@@ -2105,9 +2306,9 @@ def sincronizar_licitaciones_galicia():
                         item["id"]
                     )
 
-                # ------------------------------------------
-                # Hay otras fuentes
-                # ------------------------------------------
+                # ------------------------------------------------
+                # TIENE OTRAS FUENTES
+                # ------------------------------------------------
 
                 elif contiene_fuente(
                     fuente_actual,
@@ -2127,7 +2328,7 @@ def sincronizar_licitaciones_galicia():
                     )
 
         # ----------------------------------------------------
-        # ELIMINAR REGISTROS
+        # BORRAR
         # ----------------------------------------------------
 
         if ids_a_borrar:
@@ -2160,7 +2361,7 @@ def sincronizar_licitaciones_galicia():
             )
 
         # ----------------------------------------------------
-        # QUITAR SOLO GALICIA
+        # QUITAR GALICIA
         # ----------------------------------------------------
 
         for (
@@ -2186,14 +2387,16 @@ def sincronizar_licitaciones_galicia():
             except Exception as e:
 
                 print(
-                    f"Error quitando fuente Galicia "
-                    f"del registro {registro_id}: {e}"
+                    f"Error quitando Galicia del "
+                    f"registro {registro_id}: {e}"
                 )
+
+                errores += 1
 
         if ids_a_actualizar:
 
             print(
-                f"Quitada la fuente Galicia de "
+                f"Quitada Galicia de "
                 f"{len(ids_a_actualizar)} licitaciones "
                 f"caducadas que tenían otras fuentes."
             )
@@ -2204,32 +2407,34 @@ def sincronizar_licitaciones_galicia():
             f"Error en la limpieza de caducadas: {e}"
         )
 
+        errores += 1
+
     # ========================================================
-    # 5. INSERTAR NUEVAS EN SUPABASE
+    # 6. INSERTAR NUEVAS
     # ========================================================
 
-    if licitaciones_validas:
+    if licitaciones_nuevas:
 
-        total_a_subir = len(
-            licitaciones_validas
+        total_nuevas = len(
+            licitaciones_nuevas
         )
 
         print(
-            f"\nSubiendo un total de {total_a_subir} "
+            f"\nSubiendo un total de {total_nuevas} "
             f"licitaciones nuevas a Supabase..."
         )
 
         tamano_lote = 5
-        subidas_exitosas = 0
         max_intentos = 3
+        subidas_exitosas = 0
 
         for i in range(
             0,
-            total_a_subir,
+            total_nuevas,
             tamano_lote
         ):
 
-            lote = licitaciones_validas[
+            lote = licitaciones_nuevas[
                 i:i + tamano_lote
             ]
 
@@ -2262,7 +2467,7 @@ def sincronizar_licitaciones_galicia():
                     print(
                         f"Progreso: "
                         f"{subidas_exitosas}/"
-                        f"{total_a_subir} "
+                        f"{total_nuevas} "
                         f"licitaciones procesadas..."
                     )
 
@@ -2285,21 +2490,21 @@ def sincronizar_licitaciones_galicia():
                             2 * intento
                         )
 
-                    else:
-
-                        print(
-                            f"Error definitivo al "
-                            f"subir lote Galicia "
-                            f"{num_lote}."
-                        )
-
             if not exito:
-                continue
+
+                errores += len(
+                    lote
+                )
+
+                print(
+                    f"Error definitivo al subir "
+                    f"lote Galicia {num_lote}."
+                )
 
         print(
             f"Sincronización completada. "
             f"Se han insertado {subidas_exitosas} "
-            f"de {total_a_subir} licitaciones nuevas."
+            f"de {total_nuevas} licitaciones nuevas."
         )
 
     else:
@@ -2309,7 +2514,7 @@ def sincronizar_licitaciones_galicia():
         )
 
     # ========================================================
-    # 6. RESUMEN
+    # 7. RESUMEN
     # ========================================================
 
     print(
@@ -2325,23 +2530,33 @@ def sincronizar_licitaciones_galicia():
     )
 
     print(
-        f"Nuevas:                 {nuevas}"
+        f"Publicaciones encontradas:       {len(results)}"
     )
 
     print(
-        f"Actualizadas:           {actualizadas}"
+        f"Nuevas insertadas:               {nuevas}"
     )
 
     print(
-        f"Duplicadas:             {duplicadas}"
+        f"Actualizadas:                    {actualizadas}"
     )
 
     print(
-        f"Descartadas por estado: {descartadas_estado}"
+        f"Ya existentes sin cambios:       "
+        f"{ya_existentes_sin_cambios}"
     )
 
     print(
-        f"Errores:                {errores}"
+        f"Duplicadas por título + órgano:  {duplicadas}"
+    )
+
+    print(
+        f"Descartadas por estado:           "
+        f"{descartadas_estado}"
+    )
+
+    print(
+        f"Errores:                          {errores}"
     )
 
     print(
