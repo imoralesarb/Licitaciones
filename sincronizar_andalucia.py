@@ -1,22 +1,24 @@
 # -*- coding: utf-8 -*-
 
 # Editado 10/09/2026
-# Sincroniza las licitaciones de la Junta de Andalucía con Supabase.
 #
-# - Consulta directamente el Elasticsearch utilizado por el portal oficial.
-# - Filtra directamente en Elasticsearch las licitaciones publicadas
-#   en los últimos 3 días.
-# - Recorre únicamente las páginas necesarias dentro de ese periodo.
-# - Ordena por fecha de publicación descendente.
-# - Consulta el detalle de cada expediente.
-# - Busca primero coincidencias por enlace.
-# - Si no existe el enlace, busca por título + órgano.
-# - Si una licitación ya existe con otra fuente, añade Andalucía a "fuente".
-# - Evita duplicados.
-# - Marca las nuevas como es_novedad=True.
-# - Marca como es_actualizada=True únicamente cuando cambian datos reales.
-# - No considera como actualización el simple hecho de añadir una fuente.
-# - Genera embedding para las nuevas licitaciones.
+# Sincroniza las licitaciones de Andalucía con Supabase.
+#
+# Funcionamiento:
+# 1. Consulta el buscador Elasticsearch de Andalucía.
+# 2. Los resultados se solicitan ordenados por fechaPublicacion DESC.
+# 3. Se empiezan a consultar los resultados más recientes.
+# 4. Solo se procesan las licitaciones publicadas en los últimos 3 días.
+# 5. Cuando aparece una licitación anterior al periodo,
+#    se detiene completamente la búsqueda.
+# 6. NO se utiliza el total de resultados del buscador.
+# 7. Se buscan coincidencias por enlace.
+# 8. Si no existe el enlace, se busca por título + órgano.
+# 9. Si existe con otra fuente, se añade Andalucía a "fuente".
+# 10. Las nuevas licitaciones se marcan como es_novedad=True.
+# 11. Las modificaciones reales se marcan como es_actualizada=True.
+# 12. Añadir Andalucía como fuente no se considera una actualización.
+# 13. Se genera embedding para las nuevas licitaciones.
 
 
 from datetime import datetime, date, timedelta
@@ -50,47 +52,61 @@ supabase: Client = create_client(
 )
 
 
-# ------------------------------------------------------------
-# URLs de Elasticsearch
-# ------------------------------------------------------------
+# ============================================================
+# 2. CONFIGURACIÓN DE ANDALUCÍA
+# ============================================================
+
+FUENTE = "Andalucía"
 
 BASE_URL = (
     "https://www.juntadeandalucia.es/"
     "haciendayadministracionpublica/apl/pdc-front-publico"
 )
 
+# Buscador general de expedientes
 URL_BUSCADOR = (
     f"{BASE_URL}/elastic/"
     "sirec_pdc_expedientes/_search?pretty"
 )
 
+# Índice de detalle de expedientes
 URL_DETALLE = (
     f"{BASE_URL}/elastic/"
     "sirec_pdc_expedientes_details/_search?pretty"
 )
 
 
-# ------------------------------------------------------------
-# Configuración
-# ------------------------------------------------------------
+# ============================================================
+# 3. PARÁMETROS
+# ============================================================
 
-FUENTE = "Andalucía"
+# Número de resultados solicitados en cada petición.
+#
+# Como el portal está ordenado por fechaPublicacion DESC,
+# 100 resultados permiten avanzar mucho más rápido.
+TAMANO_PAGINA = 100
 
-TAMANO_PAGINA = 10
-
-# Hoy + los dos días anteriores.
-# Ejemplo si hoy es 10/09:
-# 10/09, 09/09 y 08/09.
+# Últimos 3 días:
+#
+# Si hoy es 10/09/2026:
+#   10/09/2026
+#   09/09/2026
+#   08/09/2026
+#
+# Cuando aparezca 07/09/2026 o anterior,
+# se detiene la búsqueda.
 DIAS_ATRAS = 2
 
+# Pausa entre peticiones
 PAUSA_ENTRE_PETICIONES = 0.15
 
+# Tamaño de lote para cargar Supabase
 TAMANO_LOTE = 500
 
 
-# ------------------------------------------------------------
-# Modelo de embeddings
-# ------------------------------------------------------------
+# ============================================================
+# 4. MODELO DE EMBEDDINGS
+# ============================================================
 
 MODELO_EMBEDDING = "intfloat/multilingual-e5-small"
 
@@ -105,7 +121,7 @@ print("Modelo de embeddings cargado.")
 
 
 # ============================================================
-# 2. SESIÓN HTTP
+# 5. SESIÓN HTTP
 # ============================================================
 
 session = requests.Session()
@@ -151,17 +167,17 @@ session.headers.update({
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/152.0.0.0 Safari/537.36"
-    ),
+    )
 })
 
 
 # ============================================================
-# 3. FUNCIONES AUXILIARES
+# 6. FUNCIONES AUXILIARES
 # ============================================================
 
 def limpiar_texto(valor):
     """
-    Limpia espacios y devuelve una cadena.
+    Limpia espacios y caracteres especiales.
     """
 
     if valor is None:
@@ -169,47 +185,68 @@ def limpiar_texto(valor):
 
     texto = str(valor)
 
-    texto = texto.replace("\xa0", " ")
-    texto = re.sub(r"\s+", " ", texto)
+    texto = texto.replace(
+        "\xa0",
+        " "
+    )
+
+    texto = re.sub(
+        r"\s+",
+        " ",
+        texto
+    )
 
     return texto.strip()
 
 
 def normalizar_texto(valor):
     """
-    Normaliza texto para comparaciones.
+    Normaliza texto para realizar comparaciones.
     """
 
-    texto = limpiar_texto(valor).lower()
+    texto = limpiar_texto(
+        valor
+    ).lower()
 
-    texto = (
-        texto
-        .replace("á", "a")
-        .replace("é", "e")
-        .replace("í", "i")
-        .replace("ó", "o")
-        .replace("ú", "u")
-        .replace("ü", "u")
-        .replace("ñ", "n")
-    )
+    reemplazos = {
+        "á": "a",
+        "é": "e",
+        "í": "i",
+        "ó": "o",
+        "ú": "u",
+        "ü": "u",
+        "ñ": "n"
+    }
+
+    for origen, destino in reemplazos.items():
+
+        texto = texto.replace(
+            origen,
+            destino
+        )
 
     return texto
 
 
 def normalizar_organo(organo):
     """
-    Normaliza el nombre del órgano.
+    Normaliza el órgano de contratación.
     """
 
-    return normalizar_texto(organo)
+    return normalizar_texto(
+        organo
+    )
 
 
 def obtener_valor(data, *claves):
     """
-    Busca el primer valor disponible entre varias claves.
+    Devuelve el primer valor existente entre las claves.
     """
 
-    if not isinstance(data, dict):
+    if not isinstance(
+        data,
+        dict
+    ):
         return None
 
     for clave in claves:
@@ -224,79 +261,40 @@ def obtener_valor(data, *claves):
     return None
 
 
-def convertir_importe(valor):
-    """
-    Convierte importes españoles a float.
-
-    Ejemplo:
-        6.021.000,00 € -> 6021000.00
-    """
-
-    if valor is None:
-        return None
-
-    if isinstance(valor, (int, float)):
-        return float(valor)
-
-    texto = limpiar_texto(valor)
-
-    if not texto:
-        return None
-
-    texto = texto.replace("€", "")
-    texto = texto.replace("EUR", "")
-    texto = texto.strip()
-
-    if "," in texto:
-
-        texto = texto.replace(".", "")
-        texto = texto.replace(",", ".")
-
-    else:
-
-        texto = texto.replace(" ", "")
-
-    texto = re.sub(
-        r"[^\d.\-]",
-        "",
-        texto
-    )
-
-    if not texto:
-        return None
-
-    try:
-        return float(texto)
-
-    except ValueError:
-        return None
-
-
 def extraer_fecha(valor):
     """
-    Convierte diferentes formatos de fecha a datetime.
+    Convierte distintos formatos de fecha a datetime.
     """
 
     if valor is None:
         return None
 
-    if isinstance(valor, datetime):
+    if isinstance(
+        valor,
+        datetime
+    ):
         return valor
 
-    if isinstance(valor, date):
+    if isinstance(
+        valor,
+        date
+    ):
         return datetime.combine(
             valor,
             datetime.min.time()
         )
 
-    texto = limpiar_texto(valor)
+    texto = limpiar_texto(
+        valor
+    )
 
     if not texto:
         return None
 
     formatos = [
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d",
         "%d/%m/%Y %H:%M:%S",
@@ -313,54 +311,162 @@ def extraer_fecha(valor):
     for formato in formatos:
 
         try:
-            return datetime.strptime(
+
+            fecha = datetime.strptime(
                 texto,
                 formato
             )
+
+            if fecha.tzinfo is not None:
+
+                fecha = fecha.replace(
+                    tzinfo=None
+                )
+
+            return fecha
 
         except ValueError:
             continue
 
     try:
 
-        texto_iso = texto.replace(
-            "Z",
-            "+00:00"
+        texto_iso = texto
+
+        if (
+            texto_iso.endswith("Z")
+        ):
+            texto_iso = (
+                texto_iso[:-1]
+                + "+00:00"
+            )
+
+        # Convierte +0200 en +02:00
+        texto_iso = re.sub(
+            r"([+-]\d{2})(\d{2})$",
+            r"\1:\2",
+            texto_iso
         )
 
-        return datetime.fromisoformat(
+        fecha = datetime.fromisoformat(
             texto_iso
-        ).replace(
-            tzinfo=None
         )
+
+        if fecha.tzinfo is not None:
+
+            fecha = fecha.replace(
+                tzinfo=None
+            )
+
+        return fecha
 
     except ValueError:
-        pass
-
-    return None
+        return None
 
 
 def formatear_fecha_supabase(fecha):
     """
-    Convierte datetime a formato ISO para Supabase.
+    Convierte datetime al formato utilizado por Supabase.
     """
 
     if fecha is None:
         return None
+
+    if isinstance(
+        fecha,
+        date
+    ) and not isinstance(
+        fecha,
+        datetime
+    ):
+
+        fecha = datetime.combine(
+            fecha,
+            datetime.min.time()
+        )
 
     return fecha.strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
 
+def convertir_importe(valor):
+    """
+    Convierte un importe español a float.
+
+    Ejemplo:
+        6.021.000,00 € -> 6021000.0
+    """
+
+    if valor is None:
+        return None
+
+    if isinstance(
+        valor,
+        (int, float)
+    ):
+        return float(valor)
+
+    texto = limpiar_texto(
+        valor
+    )
+
+    if not texto:
+        return None
+
+    texto = texto.replace(
+        "€",
+        ""
+    )
+
+    texto = texto.replace(
+        "EUR",
+        ""
+    )
+
+    texto = texto.strip()
+
+    if "," in texto:
+
+        texto = texto.replace(
+            ".",
+            ""
+        )
+
+        texto = texto.replace(
+            ",",
+            "."
+        )
+
+    else:
+
+        texto = texto.replace(
+            " ",
+            ""
+        )
+
+    texto = re.sub(
+        r"[^\d.\-]",
+        "",
+        texto
+    )
+
+    if not texto:
+        return None
+
+    try:
+
+        return float(
+            texto
+        )
+
+    except ValueError:
+
+        return None
+
+
 def obtener_fuentes(fuente):
     """
     Convierte el campo fuente en una lista.
-
-    Ejemplo:
-        Galicia, TED
-        ->
-        ["Galicia", "TED"]
     """
 
     if not fuente:
@@ -373,20 +479,32 @@ def obtener_fuentes(fuente):
     ]
 
 
-def contiene_fuente(fuente, fuente_buscar):
+def contiene_fuente(
+    fuente,
+    fuente_buscar
+):
     """
-    Comprueba si una fuente está presente.
+    Comprueba si una fuente está incluida.
     """
 
     fuentes = obtener_fuentes(
         fuente
     )
 
-    return any(
-        normalizar_texto(f) ==
-        normalizar_texto(fuente_buscar)
-        for f in fuentes
-    )
+    for fuente_actual in fuentes:
+
+        if (
+            normalizar_texto(
+                fuente_actual
+            )
+            ==
+            normalizar_texto(
+                fuente_buscar
+            )
+        ):
+            return True
+
+    return False
 
 
 def añadir_fuente(
@@ -401,134 +519,62 @@ def añadir_fuente(
         fuente_actual
     )
 
-    if not any(
-        normalizar_texto(f) ==
-        normalizar_texto(nueva_fuente)
-        for f in fuentes
+    if not contiene_fuente(
+        fuente_actual,
+        nueva_fuente
     ):
+
         fuentes.append(
             nueva_fuente
         )
 
-    return ", ".join(fuentes)
-
-
-def eliminar_fuente(
-    fuente_actual,
-    fuente_eliminar
-):
-    """
-    Elimina una fuente concreta.
-    """
-
-    fuentes = obtener_fuentes(
-        fuente_actual
-    )
-
-    fuentes = [
-        f
-        for f in fuentes
-        if normalizar_texto(f) !=
-        normalizar_texto(fuente_eliminar)
-    ]
-
-    return ", ".join(fuentes)
-
-
-def extraer_codigo_expediente(url):
-    """
-    Extrae idExpediente de una URL de Andalucía.
-    """
-
-    if not url:
-        return None
-
-    coincidencia = re.search(
-        r"idExpediente=([^&#]+)",
-        str(url),
-        flags=re.I
-    )
-
-    if coincidencia:
-        return coincidencia.group(1)
-
-    return None
-
-
-def construir_enlace(codigo):
-    """
-    Construye la URL pública de detalle.
-    """
-
-    if not codigo:
-        return None
-
-    return (
-        f"{BASE_URL}/perfiles-licitaciones/"
-        f"detalle-licitacion?idExpediente={codigo}"
+    return ", ".join(
+        fuentes
     )
 
 
 def normalizar_tipo_contrato(tipo):
     """
-    Normaliza los tipos de contrato.
+    Normaliza el tipo de contrato.
     """
 
-    tipo_limpio = limpiar_texto(
+    if isinstance(
+        tipo,
+        dict
+    ):
+
+        tipo = obtener_valor(
+            tipo,
+            "descripcion",
+            "description",
+            "nombre",
+            "name"
+        )
+
+    tipo = limpiar_texto(
         tipo
     )
 
-    if not tipo_limpio:
+    if not tipo:
         return None
 
-    tipo_norm = normalizar_texto(
-        tipo_limpio
-    )
-
-    if tipo_norm.startswith(
-        "suministr"
-    ):
-        return "Suministro"
-
-    if tipo_norm.startswith(
-        "servici"
-    ):
-        return "Servicios"
-
-    if tipo_norm == "obras":
-        return "Obras"
-
-    if (
-        "concesion de servicios"
-        in tipo_norm
-    ):
-        return "Concesión de servicios"
-
-    if (
-        "concesion de obras"
-        in tipo_norm
-    ):
-        return "Concesión de obras"
-
-    return tipo_limpio
+    return tipo
 
 
 def limpiar_lugar_ejecucion(lugar):
     """
-    Normaliza el lugar de ejecución.
-
-    Ejemplo:
-        ES618 - Sevilla
-        ->
-        Sevilla
+    Limpia el lugar de ejecución.
     """
 
     if lugar is None:
         return None
 
-    if isinstance(lugar, list):
+    if isinstance(
+        lugar,
+        list
+    ):
 
-        lugares = []
+        valores = []
 
         for elemento in lugar:
 
@@ -537,24 +583,39 @@ def limpiar_lugar_ejecucion(lugar):
             )
 
             if limpio:
-                lugares.append(
+                valores.append(
                     limpio
                 )
 
-        if not lugares:
-            return None
-
         resultado = []
 
-        for item in lugares:
+        for valor in valores:
 
-            if item not in resultado:
+            if valor not in resultado:
+
                 resultado.append(
-                    item
+                    valor
                 )
 
-        return ", ".join(
-            resultado
+        return (
+            ", ".join(resultado)
+            if resultado
+            else None
+        )
+
+    if isinstance(
+        lugar,
+        dict
+    ):
+
+        lugar = obtener_valor(
+            lugar,
+            "descripcion",
+            "description",
+            "nombre",
+            "name",
+            "municipio",
+            "provincia"
         )
 
     texto = limpiar_texto(
@@ -564,6 +625,7 @@ def limpiar_lugar_ejecucion(lugar):
     if not texto:
         return None
 
+    # Elimina códigos NUTS como ES618
     texto = re.sub(
         r"\(c[oó]digo\s+NUTS\)",
         "",
@@ -592,21 +654,24 @@ def limpiar_lugar_ejecucion(lugar):
     return texto or None
 
 
-def extraer_codigo_cpv(cpv):
+def extraer_cpv(cpv):
     """
-    Extrae el CPV.
+    Extrae el CPV de diferentes estructuras.
     """
 
     if cpv is None:
         return None
 
-    if isinstance(cpv, list):
+    if isinstance(
+        cpv,
+        list
+    ):
 
         valores = []
 
         for elemento in cpv:
 
-            valor = extraer_codigo_cpv(
+            valor = extraer_cpv(
                 elemento
             )
 
@@ -615,23 +680,26 @@ def extraer_codigo_cpv(cpv):
                     valor
                 )
 
-        if not valores:
-            return None
-
         resultado = []
 
         for valor in valores:
 
             if valor not in resultado:
+
                 resultado.append(
                     valor
                 )
 
-        return ", ".join(
-            resultado
+        return (
+            ", ".join(resultado)
+            if resultado
+            else None
         )
 
-    if isinstance(cpv, dict):
+    if isinstance(
+        cpv,
+        dict
+    ):
 
         codigo = obtener_valor(
             cpv,
@@ -657,11 +725,13 @@ def extraer_codigo_cpv(cpv):
             )
 
         if codigo:
+
             return limpiar_texto(
                 codigo
             )
 
         if descripcion:
+
             return limpiar_texto(
                 descripcion
             )
@@ -675,80 +745,8 @@ def extraer_codigo_cpv(cpv):
     return texto or None
 
 
-def extraer_texto_recursivo(obj):
-    """
-    Convierte una estructura JSON en texto.
-    """
-
-    partes = []
-
-    if obj is None:
-        return partes
-
-    if isinstance(obj, dict):
-
-        for clave, valor in obj.items():
-
-            if clave in {
-                "embedding",
-                "vector",
-                "_source",
-                "_index",
-                "_id",
-                "sort"
-            }:
-                continue
-
-            if isinstance(
-                valor,
-                (dict, list)
-            ):
-
-                partes.extend(
-                    extraer_texto_recursivo(
-                        valor
-                    )
-                )
-
-            else:
-
-                texto = limpiar_texto(
-                    valor
-                )
-
-                if texto:
-
-                    partes.append(
-                        f"{limpiar_texto(clave)}: "
-                        f"{texto}"
-                    )
-
-    elif isinstance(obj, list):
-
-        for elemento in obj:
-
-            partes.extend(
-                extraer_texto_recursivo(
-                    elemento
-                )
-            )
-
-    else:
-
-        texto = limpiar_texto(
-            obj
-        )
-
-        if texto:
-            partes.append(
-                texto
-            )
-
-    return partes
-
-
 # ============================================================
-# 4. PETICIONES A ELASTICSEARCH
+# 7. PETICIÓN A ELASTICSEARCH
 # ============================================================
 
 def consultar_elasticsearch(
@@ -757,7 +755,7 @@ def consultar_elasticsearch(
     timeout=60
 ):
     """
-    Ejecuta una consulta POST contra Elasticsearch.
+    Realiza una petición POST a Elasticsearch.
     """
 
     try:
@@ -783,48 +781,35 @@ def consultar_elasticsearch(
     except ValueError as e:
 
         print(
-            "ERROR al interpretar JSON "
-            f"de Elasticsearch: {e}"
+            "ERROR interpretando la respuesta "
+            f"JSON: {e}"
         )
 
         return None
 
 
+# ============================================================
+# 8. OBTENER UNA PÁGINA DEL BUSCADOR
+# ============================================================
+
 def obtener_pagina_busqueda(
-    desde,
-    fecha_minima,
-    fecha_maxima
+    desde
 ):
     """
-    Obtiene una página de licitaciones publicadas
-    dentro del periodo solicitado.
+    Obtiene una página del buscador de Andalucía.
 
     IMPORTANTE:
-    El filtro de fecha se hace directamente en Elasticsearch,
-    por lo que no se recorren las 87.000+ licitaciones históricas.
+    No se utiliza ningún filtro de fecha en Elasticsearch.
+
+    Los resultados se ordenan por fechaPublicacion DESC.
+    Por tanto, empezamos por los más recientes y vamos avanzando
+    hasta encontrar una fecha anterior al periodo.
     """
 
     payload = {
         "query": {
             "bool": {
-                "must": [
-                    {
-                        "range": {
-                            "fechaPublicacion": {
-                                "gte": (
-                                    fecha_minima.strftime(
-                                        "%Y-%m-%dT00:00:00"
-                                    )
-                                ),
-                                "lt": (
-                                    fecha_maxima.strftime(
-                                        "%Y-%m-%dT00:00:00"
-                                    )
-                                )
-                            }
-                        }
-                    }
-                ],
+                "must": [],
                 "must_not": [
                     {
                         "match": {
@@ -848,7 +833,7 @@ def obtener_pagina_busqueda(
                 "fechaPublicacion": "desc"
             }
         ],
-        "track_total_hits": True,
+        "track_total_hits": False,
         "from": desde
     }
 
@@ -858,11 +843,15 @@ def obtener_pagina_busqueda(
     )
 
 
+# ============================================================
+# 9. OBTENER DETALLE
+# ============================================================
+
 def obtener_detalle(
     codigo_expediente
 ):
     """
-    Obtiene el detalle de un expediente concreto.
+    Obtiene el detalle de un expediente.
     """
 
     payload = {
@@ -882,14 +871,14 @@ def obtener_detalle(
 
 
 # ============================================================
-# 5. PROCESAMIENTO DE ELASTICSEARCH
+# 10. EXTRAER HITS
 # ============================================================
 
 def extraer_hits_busqueda(
     respuesta
 ):
     """
-    Extrae los hits de una respuesta.
+    Extrae los resultados de una respuesta Elasticsearch.
     """
 
     if not respuesta:
@@ -920,59 +909,11 @@ def extraer_hits_busqueda(
     return resultados
 
 
-def obtener_total_busqueda(
-    respuesta
+def obtener_source(
+    hit
 ):
     """
-    Obtiene el número total de resultados.
-    """
-
-    if not respuesta:
-        return 0
-
-    hits = respuesta.get(
-        "hits",
-        {}
-    )
-
-    if not isinstance(
-        hits,
-        dict
-    ):
-        return 0
-
-    total = hits.get(
-        "total",
-        0
-    )
-
-    if isinstance(
-        total,
-        dict
-    ):
-
-        return int(
-            total.get(
-                "value",
-                0
-            )
-        )
-
-    try:
-        return int(
-            total
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
-        return 0
-
-
-def obtener_source(hit):
-    """
-    Obtiene _source.
+    Obtiene el _source de un hit.
     """
 
     if not isinstance(
@@ -995,52 +936,11 @@ def obtener_source(hit):
     return {}
 
 
-def extraer_fecha_publicacion_hit(
-    hit
-):
-    """
-    Obtiene fechaPublicacion.
-    """
-
-    source = obtener_source(
-        hit
-    )
-
-    valor = obtener_valor(
-        source,
-        "fechaPublicacion",
-        "fecha_publicacion",
-        "fecha"
-    )
-
-    if (
-        valor is None
-        and isinstance(hit, dict)
-    ):
-
-        sort_values = hit.get(
-            "sort"
-        )
-
-        if (
-            isinstance(
-                sort_values,
-                list
-            )
-            and sort_values
-        ):
-            valor = sort_values[0]
-
-    return extraer_fecha(
-        valor
-    )
-
-
 def extraer_codigo_hit(
     hit
 ):
     """
-    Obtiene el identificador del expediente.
+    Extrae el identificador del expediente.
     """
 
     if not isinstance(
@@ -1054,6 +954,7 @@ def extraer_codigo_hit(
     )
 
     if codigo:
+
         return str(
             codigo
         )
@@ -1065,12 +966,12 @@ def extraer_codigo_hit(
     codigo = obtener_valor(
         source,
         "idExpediente",
-        "id",
         "codigoExpediente",
         "numeroExpediente"
     )
 
     if codigo:
+
         return str(
             codigo
         )
@@ -1078,40 +979,68 @@ def extraer_codigo_hit(
     return None
 
 
+def extraer_fecha_publicacion_hit(
+    hit
+):
+    """
+    Extrae fechaPublicacion del resultado.
+    """
+
+    source = obtener_source(
+        hit
+    )
+
+    valor = obtener_valor(
+        source,
+        "fechaPublicacion"
+    )
+
+    return extraer_fecha(
+        valor
+    )
+
+
 # ============================================================
-# 6. OBTENER LICITACIONES DE LOS ÚLTIMOS 3 DÍAS
+# 11. OBTENER LICITACIONES DE LOS ÚLTIMOS 3 DÍAS
 # ============================================================
 
 def obtener_licitaciones_ultimos_tres_dias():
     """
-    Obtiene únicamente las licitaciones publicadas
-    en los últimos 3 días.
+    Obtiene las licitaciones publicadas en los últimos 3 días.
 
-    El filtro se ejecuta directamente en Elasticsearch.
+    El buscador está ordenado por fechaPublicacion DESC.
+
+    Ejemplo:
+
+        10/09/2026
+        10/09/2026
+        09/09/2026
+        08/09/2026
+        08/09/2026
+        07/09/2026  <-- PARAR
+
+    En cuanto aparece una fecha anterior a la fecha mínima,
+    se detiene completamente la consulta.
     """
 
     hoy = date.today()
 
-    fecha_minima = hoy - timedelta(
-        days=DIAS_ATRAS
+    fecha_minima = (
+        hoy
+        - timedelta(
+            days=DIAS_ATRAS
+        )
     )
 
-    # Se utiliza mañana como límite exclusivo.
-    #
-    # Si hoy es 10/09/2026:
-    #
-    # gte -> 08/09/2026 00:00
-    # lt  -> 11/09/2026 00:00
-    #
-    # Esto incluye todo el día 10/09.
+    resultados_periodo = []
 
-    fecha_maxima = hoy + timedelta(
-        days=1
-    )
+    desde = 0
 
     print()
     print("=" * 70)
-    print("BUSCADOR DE ANDALUCÍA")
+    print(
+        "BUSCADOR DE ANDALUCÍA"
+    )
     print("=" * 70)
 
     print(
@@ -1125,27 +1054,27 @@ def obtener_licitaciones_ultimos_tres_dias():
         f"{hoy.strftime('%d/%m/%Y')}"
     )
 
+    print(
+        "Orden: fechaPublicacion descendente"
+    )
+
+    print(
+        "El total de resultados NO se consulta."
+    )
+
     print("=" * 70)
-
-    desde = 0
-
-    resultados_periodo = []
-
-    total_periodo = None
 
     while True:
 
+        print()
         print(
-            f"\nConsultando resultados "
+            f"Consultando resultados "
             f"{desde + 1}-"
-            f"{desde + TAMANO_PAGINA} "
-            "del periodo..."
+            f"{desde + TAMANO_PAGINA}..."
         )
 
         respuesta = obtener_pagina_busqueda(
-            desde,
-            fecha_minima,
-            fecha_maxima
+            desde
         )
 
         if respuesta is None:
@@ -1160,22 +1089,21 @@ def obtener_licitaciones_ultimos_tres_dias():
             respuesta
         )
 
-        total_periodo = obtener_total_busqueda(
-            respuesta
-        )
-
-        if desde == 0:
+        if not hits:
 
             print(
-                "Total de licitaciones publicadas "
-                "en el periodo: "
-                f"{total_periodo}"
+                "No quedan más resultados."
             )
 
-        if not hits:
             break
 
+        detener = False
+
         for hit in hits:
+
+            codigo = extraer_codigo_hit(
+                hit
+            )
 
             fecha_publicacion = (
                 extraer_fecha_publicacion_hit(
@@ -1183,15 +1111,61 @@ def obtener_licitaciones_ultimos_tres_dias():
                 )
             )
 
-            codigo = extraer_codigo_hit(
-                hit
-            )
-
             if not codigo:
+
                 continue
 
             if fecha_publicacion is None:
+
+                print(
+                    f"  [AVISO] Expediente {codigo} "
+                    "sin fecha de publicación."
+                )
+
                 continue
+
+            fecha = (
+                fecha_publicacion.date()
+            )
+
+            # ------------------------------------------------
+            # Si es anterior al periodo:
+            # PARAR COMPLETAMENTE.
+            # ------------------------------------------------
+
+            if fecha < fecha_minima:
+
+                print()
+                print(
+                    "Se ha encontrado una licitación "
+                    f"anterior al periodo "
+                    f"({fecha.strftime('%d/%m/%Y')})."
+                )
+
+                print(
+                    "Como los resultados están ordenados "
+                    "de más reciente a más antiguo,"
+                )
+
+                print(
+                    "se detiene completamente la búsqueda."
+                )
+
+                detener = True
+
+                break
+
+            # ------------------------------------------------
+            # Si es posterior a hoy, se ignora.
+            # ------------------------------------------------
+
+            if fecha > hoy:
+
+                continue
+
+            # ------------------------------------------------
+            # Está dentro del periodo.
+            # ------------------------------------------------
 
             resultados_periodo.append({
                 "hit": hit,
@@ -1201,14 +1175,32 @@ def obtener_licitaciones_ultimos_tres_dias():
                 )
             })
 
-        if (
-            desde + TAMANO_PAGINA
-            >= total_periodo
-        ):
+        # ----------------------------------------------------
+        # Si hemos encontrado una fecha antigua,
+        # terminamos todo el proceso.
+        # ----------------------------------------------------
+
+        if detener:
+
             break
 
+        # ----------------------------------------------------
+        # Si hemos recibido menos resultados que los pedidos,
+        # no quedan más.
+        # ----------------------------------------------------
+
         if len(hits) < TAMANO_PAGINA:
+
+            print()
+            print(
+                "No quedan más resultados."
+            )
+
             break
+
+        # ----------------------------------------------------
+        # Pasar a la siguiente página.
+        # ----------------------------------------------------
 
         desde += TAMANO_PAGINA
 
@@ -1217,27 +1209,26 @@ def obtener_licitaciones_ultimos_tres_dias():
         )
 
     print()
+    print("=" * 70)
 
     print(
-        "Total de licitaciones recuperadas "
-        "del periodo: "
+        "Licitaciones recuperadas dentro "
+        "de los últimos 3 días: "
         f"{len(resultados_periodo)}"
     )
+
+    print("=" * 70)
 
     return resultados_periodo
 
 
 # ============================================================
-# 7. CARGAR LICITACIONES EXISTENTES DE SUPABASE
+# 12. CARGAR SUPABASE
 # ============================================================
 
 def cargar_licitaciones_existentes():
     """
     Carga las licitaciones existentes de Supabase.
-
-    Se crean dos índices:
-        - por enlace
-        - por título + órgano
     """
 
     print()
@@ -1278,6 +1269,7 @@ def cargar_licitaciones_existentes():
         lote = respuesta.data or []
 
         if not lote:
+
             break
 
         registros.extend(
@@ -1285,6 +1277,7 @@ def cargar_licitaciones_existentes():
         )
 
         if len(lote) < TAMANO_LOTE:
+
             break
 
         inicio += TAMANO_LOTE
@@ -1307,7 +1300,10 @@ def cargar_licitaciones_existentes():
         )
 
         if enlace:
-            por_enlace[enlace] = registro
+
+            por_enlace[
+                enlace
+            ] = registro
 
         titulo = limpiar_texto(
             registro.get(
@@ -1344,7 +1340,7 @@ def cargar_licitaciones_existentes():
 
 
 # ============================================================
-# 8. GENERAR EMBEDDING
+# 13. GENERAR EMBEDDING
 # ============================================================
 
 def generar_embedding(
@@ -1359,6 +1355,7 @@ def generar_embedding(
     if registro.get(
         "titulo"
     ):
+
         partes.append(
             f"Título: "
             f"{registro['titulo']}"
@@ -1367,6 +1364,7 @@ def generar_embedding(
     if registro.get(
         "organo"
     ):
+
         partes.append(
             f"Órgano: "
             f"{registro['organo']}"
@@ -1375,6 +1373,7 @@ def generar_embedding(
     if registro.get(
         "tipo_contrato"
     ):
+
         partes.append(
             "Tipo de contrato: "
             f"{registro['tipo_contrato']}"
@@ -1383,6 +1382,7 @@ def generar_embedding(
     if registro.get(
         "cpv"
     ):
+
         partes.append(
             f"CPV: "
             f"{registro['cpv']}"
@@ -1391,14 +1391,16 @@ def generar_embedding(
     if registro.get(
         "lugar_ejecucion"
     ):
+
         partes.append(
-            "Lugar: "
+            "Lugar de ejecución: "
             f"{registro['lugar_ejecucion']}"
         )
 
     if registro.get(
         "texto_completo"
     ):
+
         partes.append(
             registro[
                 "texto_completo"
@@ -1410,6 +1412,7 @@ def generar_embedding(
     )
 
     if not texto.strip():
+
         return None
 
     try:
@@ -1431,7 +1434,7 @@ def generar_embedding(
 
 
 # ============================================================
-# 9. COMPARAR CAMBIOS
+# 14. COMPARAR CAMBIOS
 # ============================================================
 
 def valores_diferentes(
@@ -1439,7 +1442,7 @@ def valores_diferentes(
     valor_antiguo
 ):
     """
-    Compara valores de forma robusta.
+    Comprueba si dos valores son diferentes.
     """
 
     if (
@@ -1449,6 +1452,7 @@ def valores_diferentes(
             ""
         )
     ):
+
         return False
 
     if (
@@ -1458,6 +1462,7 @@ def valores_diferentes(
             ""
         )
     ):
+
         return False
 
     if (
@@ -1471,15 +1476,22 @@ def valores_diferentes(
         )
     ):
 
-        return abs(
-            valor_nuevo
-            - float(valor_antiguo)
-        ) > 0.000001
+        return (
+            abs(
+                valor_nuevo
+                - float(valor_antiguo)
+            )
+            > 0.000001
+        )
 
     return (
-        str(valor_nuevo).strip()
+        str(
+            valor_nuevo
+        ).strip()
         !=
-        str(valor_antiguo).strip()
+        str(
+            valor_antiguo
+        ).strip()
     )
 
 
@@ -1488,9 +1500,9 @@ def hay_cambios_reales(
     existente
 ):
     """
-    Determina si una licitación ha cambiado realmente.
+    Comprueba si han cambiado datos reales.
 
-    El campo fuente no se considera cambio real.
+    El campo "fuente" no se considera aquí.
     """
 
     campos = [
@@ -1520,6 +1532,7 @@ def hay_cambios_reales(
                 valor_nuevo,
                 datetime
             ):
+
                 valor_nuevo = (
                     formatear_fecha_supabase(
                         valor_nuevo
@@ -1544,13 +1557,216 @@ def hay_cambios_reales(
             valor_nuevo,
             valor_antiguo
         ):
+
             return True
 
     return False
 
 
 # ============================================================
-# 10. PREPARAR REGISTRO PARA SUPABASE
+# 15. EXTRAER DATOS DEL DETALLE
+# ============================================================
+
+def extraer_datos_detalle(
+    respuesta,
+    codigo_expediente
+):
+    """
+    Extrae los datos principales del detalle.
+
+    Se contemplan diferentes nombres de campos para hacer
+    la extracción más tolerante a cambios del portal.
+    """
+
+    if not respuesta:
+
+        return None
+
+    hits = (
+        respuesta
+        .get(
+            "hits",
+            {}
+        )
+        .get(
+            "hits",
+            []
+        )
+    )
+
+    if not hits:
+
+        return None
+
+    hit = hits[0]
+
+    source = hit.get(
+        "_source",
+        {}
+    )
+
+    if not isinstance(
+        source,
+        dict
+    ):
+
+        return None
+
+    # --------------------------------------------------------
+    # Título
+    # --------------------------------------------------------
+
+    titulo = obtener_valor(
+        source,
+        "titulo",
+        "tituloExpediente",
+        "nombre"
+    )
+
+    # --------------------------------------------------------
+    # Órgano
+    # --------------------------------------------------------
+
+    organo = obtener_valor(
+        source,
+        "organo",
+        "organoContratacion",
+        "perfilContratante"
+    )
+
+    if isinstance(
+        organo,
+        dict
+    ):
+
+        organo = obtener_valor(
+            organo,
+            "descripcion",
+            "description",
+            "nombre"
+        )
+
+    # --------------------------------------------------------
+    # Tipo de contrato
+    # --------------------------------------------------------
+
+    tipo_contrato = obtener_valor(
+        source,
+        "tipoContrato"
+    )
+
+    tipo_contrato = normalizar_tipo_contrato(
+        tipo_contrato
+    )
+
+    # --------------------------------------------------------
+    # Importe
+    # --------------------------------------------------------
+
+    importe = obtener_valor(
+        source,
+        "importeLicitacion",
+        "importe",
+        "importeSinIVA",
+        "importeLicitacionSinIVA"
+    )
+
+    importe = convertir_importe(
+        importe
+    )
+
+    # --------------------------------------------------------
+    # CPV
+    # --------------------------------------------------------
+
+    cpv = obtener_valor(
+        source,
+        "cpv",
+        "clasificacionCPV",
+        "clasificacionCpv",
+        "codigoCPV"
+    )
+
+    cpv = extraer_cpv(
+        cpv
+    )
+
+    # --------------------------------------------------------
+    # Fecha límite
+    # --------------------------------------------------------
+
+    fecha_fin = obtener_valor(
+        source,
+        "fechaLimitePresentacion",
+        "fechaFin",
+        "fechaFinPresentacion",
+        "fechaLimite"
+    )
+
+    fecha_fin = extraer_fecha(
+        fecha_fin
+    )
+
+    # --------------------------------------------------------
+    # Lugar
+    # --------------------------------------------------------
+
+    lugar = obtener_valor(
+        source,
+        "lugarEjecucion",
+        "lugar",
+        "ubicacion"
+    )
+
+    lugar = limpiar_lugar_ejecucion(
+        lugar
+    )
+
+    # --------------------------------------------------------
+    # Enlace
+    # --------------------------------------------------------
+
+    enlace = construir_enlace(
+        codigo_expediente
+    )
+
+    # --------------------------------------------------------
+    # Texto completo
+    # --------------------------------------------------------
+
+    partes_texto = (
+        extraer_texto_recursivo(
+            source
+        )
+    )
+
+    texto_completo = "\n".join(
+        partes_texto
+    )
+
+    return {
+        "enlace": enlace,
+        "titulo": limpiar_texto(
+            titulo
+        ) or None,
+        "organo": limpiar_texto(
+            organo
+        ) or None,
+        "importe": importe,
+        "tipo_contrato": tipo_contrato,
+        "cpv": cpv,
+        "fecha_fin": fecha_fin,
+        "lugar_ejecucion": lugar,
+        "texto_completo": (
+            texto_completo
+            if texto_completo
+            else None
+        )
+    }
+
+
+# ============================================================
+# 16. PREPARAR REGISTRO
 # ============================================================
 
 def preparar_registro_supabase(
@@ -1559,7 +1775,7 @@ def preparar_registro_supabase(
     embedding=None
 ):
     """
-    Prepara un registro para insertar en Supabase.
+    Prepara una nueva licitación para Supabase.
     """
 
     registro = {
@@ -1614,7 +1830,7 @@ def preparar_registro_supabase(
 
 
 # ============================================================
-# 11. PROCESAR LICITACIÓN
+# 17. PROCESAR UNA LICITACIÓN
 # ============================================================
 
 def procesar_licitacion(
@@ -1625,7 +1841,7 @@ def procesar_licitacion(
     contadores
 ):
     """
-    Procesa una licitación individual.
+    Inserta o actualiza una licitación.
     """
 
     enlace = limpiar_texto(
@@ -1659,17 +1875,17 @@ def procesar_licitacion(
 
         return
 
-    # --------------------------------------------------------
-    # Buscar por enlace
-    # --------------------------------------------------------
+    # ========================================================
+    # BUSCAR POR ENLACE
+    # ========================================================
 
     existente = por_enlace.get(
         enlace
     )
 
-    # --------------------------------------------------------
-    # Buscar por título + órgano
-    # --------------------------------------------------------
+    # ========================================================
+    # BUSCAR POR TÍTULO + ÓRGANO
+    # ========================================================
 
     if (
         existente is None
@@ -1698,13 +1914,13 @@ def procesar_licitacion(
             ] += 1
 
             print(
-                "  [DUPLICADA] Coincidencia "
-                "por título + órgano."
+                "  [DUPLICADA] "
+                "Coincidencia por título + órgano."
             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # NUEVA
-    # --------------------------------------------------------
+    # ========================================================
 
     if existente is None:
 
@@ -1750,11 +1966,6 @@ def procesar_licitacion(
                 insertados[0]
             )
 
-            nuevo_registro.setdefault(
-                "fuente",
-                FUENTE
-            )
-
             por_enlace[
                 enlace
             ] = nuevo_registro
@@ -1790,9 +2001,9 @@ def procesar_licitacion(
 
         return
 
-    # --------------------------------------------------------
-    # YA EXISTE
-    # --------------------------------------------------------
+    # ========================================================
+    # EXISTENTE
+    # ========================================================
 
     fuente_actual = existente.get(
         "fuente"
@@ -1856,9 +2067,9 @@ def procesar_licitacion(
             )
         )
 
-    # --------------------------------------------------------
-    # Añadir Andalucía como fuente
-    # --------------------------------------------------------
+    # ========================================================
+    # AÑADIR FUENTE
+    # ========================================================
 
     if not tiene_andalucia:
 
@@ -1869,9 +2080,9 @@ def procesar_licitacion(
             FUENTE
         )
 
-    # --------------------------------------------------------
-    # Marcar actualización
-    # --------------------------------------------------------
+    # ========================================================
+    # MARCAR ACTUALIZACIÓN
+    # ========================================================
 
     if cambios:
 
@@ -1879,12 +2090,9 @@ def procesar_licitacion(
             "es_actualizada"
         ] = True
 
-    # Si únicamente se ha añadido Andalucía
-    # como fuente, NO se marca como actualizada.
-
-    # --------------------------------------------------------
-    # Actualizar Supabase
-    # --------------------------------------------------------
+    # ========================================================
+    # SI NO HAY NADA QUE CAMBIAR
+    # ========================================================
 
     if not actualizacion:
 
@@ -1897,6 +2105,10 @@ def procesar_licitacion(
         )
 
         return
+
+    # ========================================================
+    # ACTUALIZAR SUPABASE
+    # ========================================================
 
     try:
 
@@ -1979,7 +2191,91 @@ def procesar_licitacion(
 
 
 # ============================================================
-# 12. FUNCIÓN PRINCIPAL
+# 18. EXTRAER TEXTO RECURSIVO
+# ============================================================
+
+def extraer_texto_recursivo(
+    obj
+):
+    """
+    Convierte recursivamente el JSON del detalle
+    en texto para texto_completo.
+    """
+
+    partes = []
+
+    if obj is None:
+
+        return partes
+
+    if isinstance(
+        obj,
+        dict
+    ):
+
+        for clave, valor in obj.items():
+
+            if clave in {
+                "embedding",
+                "vector"
+            }:
+
+                continue
+
+            if isinstance(
+                valor,
+                (dict, list)
+            ):
+
+                partes.extend(
+                    extraer_texto_recursivo(
+                        valor
+                    )
+                )
+
+            else:
+
+                texto = limpiar_texto(
+                    valor
+                )
+
+                if texto:
+
+                    partes.append(
+                        f"{limpiar_texto(clave)}: "
+                        f"{texto}"
+                    )
+
+    elif isinstance(
+        obj,
+        list
+    ):
+
+        for elemento in obj:
+
+            partes.extend(
+                extraer_texto_recursivo(
+                    elemento
+                )
+            )
+
+    else:
+
+        texto = limpiar_texto(
+            obj
+        )
+
+        if texto:
+
+            partes.append(
+                texto
+            )
+
+    return partes
+
+
+# ============================================================
+# 19. MAIN
 # ============================================================
 
 def main():
@@ -1993,9 +2289,9 @@ def main():
     )
     print("=" * 70)
 
-    # --------------------------------------------------------
-    # Obtener licitaciones de los últimos 3 días
-    # --------------------------------------------------------
+    # ========================================================
+    # OBTENER LICITACIONES RECIENTES
+    # ========================================================
 
     resultados = (
         obtener_licitaciones_ultimos_tres_dias()
@@ -2018,9 +2314,9 @@ def main():
 
         return
 
-    # --------------------------------------------------------
-    # Cargar Supabase
-    # --------------------------------------------------------
+    # ========================================================
+    # CARGAR SUPABASE
+    # ========================================================
 
     (
         registros_existentes,
@@ -2028,9 +2324,9 @@ def main():
         por_titulo_organo
     ) = cargar_licitaciones_existentes()
 
-    # --------------------------------------------------------
-    # Contadores
-    # --------------------------------------------------------
+    # ========================================================
+    # CONTADORES
+    # ========================================================
 
     contadores = {
         "nuevas": 0,
@@ -2040,9 +2336,9 @@ def main():
         "errores": 0
     }
 
-    # --------------------------------------------------------
-    # Procesar licitaciones
-    # --------------------------------------------------------
+    # ========================================================
+    # PROCESAR RESULTADOS
+    # ========================================================
 
     print()
     print("=" * 70)
@@ -2085,7 +2381,7 @@ def main():
             codigo
         )
 
-        # Evitar duplicados dentro de la propia consulta.
+        # Evitar duplicados dentro de la respuesta
         if codigo in procesadas:
 
             print(
@@ -2105,9 +2401,9 @@ def main():
             f"Expediente: {codigo}"
         )
 
-        # ----------------------------------------------------
-        # Obtener detalle
-        # ----------------------------------------------------
+        # ====================================================
+        # OBTENER DETALLE
+        # ====================================================
 
         respuesta_detalle = (
             obtener_detalle(
@@ -2127,6 +2423,10 @@ def main():
             )
 
             continue
+
+        # ====================================================
+        # EXTRAER DATOS
+        # ====================================================
 
         datos = (
             extraer_datos_detalle(
@@ -2173,9 +2473,9 @@ def main():
             f"{formatear_fecha_supabase(datos.get('fecha_fin'))}"
         )
 
-        # ----------------------------------------------------
-        # Sincronizar con Supabase
-        # ----------------------------------------------------
+        # ====================================================
+        # SINCRONIZAR
+        # ====================================================
 
         procesar_licitacion(
             datos,
@@ -2189,9 +2489,9 @@ def main():
             PAUSA_ENTRE_PETICIONES
         )
 
-    # --------------------------------------------------------
-    # Resumen
-    # --------------------------------------------------------
+    # ========================================================
+    # RESUMEN
+    # ========================================================
 
     tiempo_total = (
         time.time()
@@ -2206,8 +2506,8 @@ def main():
     print("=" * 70)
 
     print(
-        "Registros publicados en los últimos "
-        "3 días: "
+        "Licitaciones publicadas en los "
+        "últimos 3 días: "
         f"{len(resultados)}"
     )
 
@@ -2249,7 +2549,7 @@ def main():
 
 
 # ============================================================
-# 13. EJECUCIÓN
+# 20. EJECUCIÓN
 # ============================================================
 
 if __name__ == "__main__":
