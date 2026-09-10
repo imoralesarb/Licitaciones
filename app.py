@@ -539,27 +539,29 @@ def estilizar_filas(row):
 def aplicar_filtros_comunes(df):
     if df.empty:
         return df
-    st.write("FUENTES EN BBDD:")
-    st.write(df["fuente"].value_counts(dropna=False))
-    st.write(
-        "Navarra:",
-        df[df["fuente"].astype(str).str.contains("Contratación Navarra", case=False, na=False)]
-    )
+
     # 1. Filtro de fuente flexible para múltiples selecciones
     #if filtro_fuente:
      #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
      #   df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
     # 1. Filtro de fuente
+    # 1. Filtro de fuente
     if filtro_fuente:
-        fuentes_seleccionadas = [f.strip().casefold() for f in filtro_fuente]
+        fuentes_seleccionadas = [
+            f.strip().casefold()
+            for f in filtro_fuente
+        ]
     
         df = df[
             df["fuente"]
             .fillna("")
             .astype(str)
-            .str.strip()
-            .str.casefold()
-            .isin(fuentes_seleccionadas)
+            .apply(
+                lambda x: any(
+                    fuente in x.casefold()
+                    for fuente in fuentes_seleccionadas
+                )
+            )
         ]
 
     # 2. Filtro de tipo de contrato flexible
