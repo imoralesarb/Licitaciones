@@ -539,7 +539,8 @@ def estilizar_filas(row):
 def aplicar_filtros_comunes(df):
     if df.empty:
         return df
-
+    st.write("FUENTES EN BBDD:")
+    st.write(df["fuente"].value_counts(dropna=False))
     # 1. Filtro de fuente flexible para múltiples selecciones
     #if filtro_fuente:
      #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
@@ -705,8 +706,6 @@ if btn_novedades:
             else:
                 df["relevancia"] = 100.0
                 
-            st.write("FUENTES EN BBDD:")
-            st.write(df["fuente"].value_counts(dropna=False))
             df = aplicar_filtros_comunes(df)
 
             if df.empty:
