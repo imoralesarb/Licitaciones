@@ -86,7 +86,8 @@ def procesar_lugar(lugar_raw):
 
 def quitar_fuente_pscp(fuente):
     """
-    Elimina 'PSCP Catalunya' de una cadena de fuentes.
+    Elimina únicamente 'PSCP Catalunya'
+    de una cadena de fuentes.
     """
     if not fuente:
         return ""
@@ -114,7 +115,8 @@ def sincronizar_licitaciones_pscp():
 
     hoy_date = datetime.now().date()
 
-    # Últimos 3 días: hoy + ayer + anteayer
+    # Últimos 3 días:
+    # hoy + ayer + anteayer
     limite_fecha = hoy_date - timedelta(days=2)
 
     fecha_inicio = limite_fecha.strftime(
@@ -186,125 +188,179 @@ def sincronizar_licitaciones_pscp():
     # 2. CARGAR REGISTROS EXISTENTES
     # ========================================================
 
+    print(
+        "Cargando registros existentes desde Supabase..."
+    )
+
     try:
+
         existentes_resp = (
             supabase
             .table("licitaciones")
             .select(
                 "id, enlace, titulo, organo, fuente, "
-                "importe, tipo_contrato, fecha_fin, "
-                "es_novedad, es_actualizada"
+                "fecha, importe, tipo_contrato, cpv, "
+                "fecha_fin, es_novedad, es_actualizada"
             )
             .execute()
         )
 
-        registros_db = {
-            item["enlace"]: item
-            for item in existentes_resp.data
-            if item.get("enlace")
-        }
+        registros_db = {}
+        ids_flags_pscp = []
+
+        for item in existentes_resp.data:
+
+            enlace_item = item.get("enlace")
+
+            if enlace_item:
+                registros_db[enlace_item] = item
+
+            # Buscar registros cuya fuente contenga PSCP
+            fuente_item = str(
+                item.get("fuente", "")
+            )
+
+            if (
+                "pscp catalunya"
+                in fuente_item.casefold()
+                and (
+                    item.get("es_novedad") is True
+                    or item.get("es_actualizada") is True
+                )
+            ):
+                ids_flags_pscp.append(
+                    item["id"]
+                )
+
+        print(
+            f"Registros totales cargados desde Supabase: "
+            f"{len(registros_db)}"
+        )
 
     except Exception as e:
+
         print(
-            f"Error conectando con Supabase para lectura: {e}"
+            f"Error conectando con Supabase para lectura: "
+            f"{e}"
         )
         return
 
     # ========================================================
-    # 3. RESETEAR FLAGS DE PSCP
+    # 3. RESETEAR ETIQUETAS ANTERIORES DE PSCP
     # ========================================================
 
-    print(
-        "Reseteando flags de novedades y actualizaciones "
-        "anteriores de PSCP..."
-    )
-
-    total_reseteadas = 0
-
-    # --------------------------------------------------------
-    # Resetear es_novedad
-    # --------------------------------------------------------
-
-    try:
-        response_novedad = (
-            supabase
-            .table("licitaciones")
-            .update({
-                "es_novedad": False
-            })
-            .ilike(
-                "fuente",
-                "%PSCP Catalunya%"
-            )
-            .eq(
-                "es_novedad",
-                True
-            )
-            .execute()
-        )
-
-        total_novedad = len(
-            response_novedad.data
-            if response_novedad.data
-            else []
-        )
-
-        total_reseteadas += total_novedad
+    if ids_flags_pscp:
 
         print(
-            f"Flags es_novedad reseteadas: "
-            f"{total_novedad}"
+            f"Reseteando etiquetas anteriores de "
+            f"{len(ids_flags_pscp)} registros de PSCP..."
         )
 
-    except Exception as e:
-        print(
-            f"⚠️ Error reseteando es_novedad: {e}"
-        )
+        tamano_reset = 25
+        max_intentos_reset = 3
+        reset_correcto = True
+        total_reseteadas = 0
 
-    # --------------------------------------------------------
-    # Resetear es_actualizada
-    # --------------------------------------------------------
+        for i in range(
+            0,
+            len(ids_flags_pscp),
+            tamano_reset
+        ):
 
-    try:
-        response_actualizada = (
-            supabase
-            .table("licitaciones")
-            .update({
-                "es_actualizada": False
-            })
-            .ilike(
-                "fuente",
-                "%PSCP Catalunya%"
+            lote_ids = ids_flags_pscp[
+                i:i + tamano_reset
+            ]
+
+            num_lote_reset = (
+                i // tamano_reset
+            ) + 1
+
+            exito_lote = False
+
+            for intento in range(
+                1,
+                max_intentos_reset + 1
+            ):
+
+                try:
+
+                    (
+                        supabase
+                        .table("licitaciones")
+                        .update({
+                            "es_novedad": False,
+                            "es_actualizada": False
+                        })
+                        .in_(
+                            "id",
+                            lote_ids
+                        )
+                        .execute()
+                    )
+
+                    total_reseteadas += len(
+                        lote_ids
+                    )
+
+                    print(
+                        f"  -> Lote de etiquetas "
+                        f"{num_lote_reset} reseteado "
+                        f"con éxito "
+                        f"({len(lote_ids)} registros)."
+                    )
+
+                    exito_lote = True
+                    break
+
+                except Exception as e:
+
+                    print(
+                        f"  -> Intento "
+                        f"{intento}/{max_intentos_reset} "
+                        f"fallido para lote de etiquetas "
+                        f"{num_lote_reset}: {e}"
+                    )
+
+                    if intento < max_intentos_reset:
+                        time.sleep(
+                            2 * intento
+                        )
+
+                    else:
+
+                        print(
+                            f"  -> Error definitivo "
+                            f"al resetear el lote "
+                            f"de etiquetas "
+                            f"{num_lote_reset}."
+                        )
+
+                        reset_correcto = False
+
+            if not exito_lote:
+                continue
+
+        if reset_correcto:
+
+            print(
+                f"Etiquetas anteriores reseteadas "
+                f"correctamente: "
+                f"{total_reseteadas} registros."
             )
-            .eq(
-                "es_actualizada",
-                True
+
+        else:
+
+            print(
+                "Aviso: no se pudieron resetear "
+                "todas las etiquetas anteriores."
             )
-            .execute()
-        )
 
-        total_actualizada = len(
-            response_actualizada.data
-            if response_actualizada.data
-            else []
-        )
-
-        total_reseteadas += total_actualizada
+    else:
 
         print(
-            f"Flags es_actualizada reseteadas: "
-            f"{total_actualizada}"
+            "No hay etiquetas anteriores de PSCP "
+            "que resetear."
         )
-
-    except Exception as e:
-        print(
-            f"⚠️ Error reseteando es_actualizada: {e}"
-        )
-
-    print(
-        f"Total de flags reseteadas: "
-        f"{total_reseteadas}"
-    )
 
     # ========================================================
     # 4. PROCESAR REGISTROS DE LA API
@@ -375,12 +431,14 @@ def sincronizar_licitaciones_pscp():
             )[:10]
 
             try:
+
                 cierre_date = datetime.strptime(
                     fecha_fin_str,
                     "%Y-%m-%d"
                 ).date()
 
                 if cierre_date < hoy_date:
+
                     filtrados_caducados += 1
                     continue
 
@@ -413,9 +471,16 @@ def sincronizar_licitaciones_pscp():
         )
 
         try:
-            importe = float(importe_val)
 
-        except (ValueError, TypeError):
+            importe = float(
+                importe_val
+            )
+
+        except (
+            ValueError,
+            TypeError
+        ):
+
             importe = 0.0
 
         # ----------------------------------------------------
@@ -431,14 +496,19 @@ def sincronizar_licitaciones_pscp():
             cpv_raw
             and cpv_raw != "No especificado"
         ):
+
             cpv = ", ".join(
                 [
                     c.strip()
-                    for c in str(cpv_raw).split("||")
+                    for c in str(
+                        cpv_raw
+                    ).split("||")
                     if c.strip()
                 ]
             )
+
         else:
+
             cpv = "No especificado"
 
         # ----------------------------------------------------
@@ -468,7 +538,7 @@ def sincronizar_licitaciones_pscp():
         )
 
         # ----------------------------------------------------
-        # TEXTO PARA EMBEDDING
+        # TEXTO COMPLETO
         # ----------------------------------------------------
 
         texto_completo = (
@@ -486,7 +556,9 @@ def sincronizar_licitaciones_pscp():
 
         if enlace in registros_db:
 
-            reg_antiguo = registros_db[enlace]
+            reg_antiguo = registros_db[
+                enlace
+            ]
 
             fuente_actual = str(
                 reg_antiguo.get(
@@ -514,17 +586,24 @@ def sincronizar_licitaciones_pscp():
             ):
 
                 if fuente_actual:
+
                     nueva_fuente = (
                         f"{fuente_actual}, "
                         f"PSCP Catalunya"
                     )
-                else:
-                    nueva_fuente = "PSCP Catalunya"
 
-                actualizar_datos["fuente"] = nueva_fuente
+                else:
+
+                    nueva_fuente = (
+                        "PSCP Catalunya"
+                    )
+
+                actualizar_datos[
+                    "fuente"
+                ] = nueva_fuente
 
             # ------------------------------------------------
-            # COMPLETAR TIPO DE CONTRATO SI FALTA
+            # COMPLETAR TIPO DE CONTRATO
             # ------------------------------------------------
 
             if (
@@ -532,15 +611,19 @@ def sincronizar_licitaciones_pscp():
                 or tipo_actual == "No especificado"
             ):
 
-                if tipo_contrato != "No especificado":
+                if (
+                    tipo_contrato
+                    != "No especificado"
+                ):
+
                     actualizar_datos[
                         "tipo_contrato"
                     ] = tipo_contrato
 
             # ------------------------------------------------
-            # COMPROBAR SI HA CAMBIADO
+            # COMPROBAR CAMBIOS
             #
-            # En PSCP, fecha_fin TAMBIÉN cuenta como cambio.
+            # En PSCP, fecha_fin TAMBIÉN cuenta.
             # ------------------------------------------------
 
             es_actualizado = (
@@ -553,29 +636,43 @@ def sincronizar_licitaciones_pscp():
             )
 
             if es_actualizado:
+
                 actualizar_datos[
                     "es_actualizada"
                 ] = True
 
             # ------------------------------------------------
-            # ACTUALIZAR SOLO SI HAY CAMBIOS
+            # ACTUALIZAR
             # ------------------------------------------------
 
             if actualizar_datos:
 
                 try:
+
                     (
                         supabase
                         .table("licitaciones")
-                        .update(actualizar_datos)
-                        .eq("enlace", enlace)
+                        .update(
+                            actualizar_datos
+                        )
+                        .eq(
+                            "enlace",
+                            enlace
+                        )
                         .execute()
                     )
 
+                    # Mantener el diccionario actualizado
+                    reg_antiguo.update(
+                        actualizar_datos
+                    )
+
                 except Exception as e:
+
                     print(
-                        f"Error actualizando registro "
-                        f"existente {enlace}: {e}"
+                        f"Error actualizando "
+                        f"registro existente "
+                        f"{enlace}: {e}"
                     )
 
             continue
@@ -611,7 +708,8 @@ def sincronizar_licitaciones_pscp():
 
     print(
         "Licitaciones descartadas por estar "
-        f"caducadas en la API: {filtrados_caducados}"
+        f"caducadas en la API: "
+        f"{filtrados_caducados}"
     )
 
     # ========================================================
@@ -664,8 +762,10 @@ def sincronizar_licitaciones_pscp():
                         )
                     )
 
-                    nueva_fuente = quitar_fuente_pscp(
-                        fuente_actual
+                    nueva_fuente = (
+                        quitar_fuente_pscp(
+                            fuente_actual
+                        )
                     )
 
                     if not nueva_fuente:
@@ -687,7 +787,7 @@ def sincronizar_licitaciones_pscp():
                 pass
 
         # ----------------------------------------------------
-        # ELIMINAR REGISTROS CUYA ÚNICA FUENTE ERA PSCP
+        # BORRAR SI PSCP ES LA ÚNICA FUENTE
         # ----------------------------------------------------
 
         if ids_a_borrar:
@@ -706,17 +806,21 @@ def sincronizar_licitaciones_pscp():
                     supabase
                     .table("licitaciones")
                     .delete()
-                    .in_("id", lote_ids)
+                    .in_(
+                        "id",
+                        lote_ids
+                    )
                     .execute()
                 )
 
             print(
-                f"Eliminadas {len(ids_a_borrar)} "
+                f"Eliminadas "
+                f"{len(ids_a_borrar)} "
                 "licitaciones caducadas de PSCP."
             )
 
         # ----------------------------------------------------
-        # QUITAR PSCP SI HAY OTRAS FUENTES
+        # SI HAY OTRAS FUENTES, QUITAR SOLO PSCP
         # ----------------------------------------------------
 
         if ids_fuente_a_actualizar:
@@ -748,8 +852,9 @@ def sincronizar_licitaciones_pscp():
                 except Exception as e:
 
                     print(
-                        f"Error actualizando fuente "
-                        f"del registro {rec_id}: {e}"
+                        f"Error actualizando "
+                        f"fuente del registro "
+                        f"{rec_id}: {e}"
                     )
 
             print(
@@ -761,7 +866,8 @@ def sincronizar_licitaciones_pscp():
     except Exception as e:
 
         print(
-            f"Error en la limpieza de caducadas: {e}"
+            f"Error en la limpieza de caducadas: "
+            f"{e}"
         )
 
     # ========================================================
@@ -835,22 +941,29 @@ def sincronizar_licitaciones_pscp():
 
                     print(
                         f"⚠️ Intento "
-                        f"{intento}/{max_intentos} "
-                        f"fallido para lote PSCP "
-                        f"{num_lote}: {e}"
+                        f"{intento}/"
+                        f"{max_intentos} "
+                        f"fallido para lote "
+                        f"PSCP {num_lote}: "
+                        f"{e}"
                     )
 
                     if intento < max_intentos:
+
                         time.sleep(
                             2 * intento
                         )
 
                     else:
+
                         print(
                             f"❌ Error definitivo "
                             f"al subir lote PSCP "
                             f"{num_lote}."
                         )
+
+            if not exito:
+                pass
 
         print(
             f"Sincronización completada. "
