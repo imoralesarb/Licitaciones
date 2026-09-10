@@ -56,3 +56,15 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python auditar_abiertas_madrid.py
+      - name: Ejecutar auditoría La Rioja
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python auditar_abiertas_larioja.py
+      - name: Ejecutar auditoría Navarra
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python auditar_abiertas_navarra.py
