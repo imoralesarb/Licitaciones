@@ -12,15 +12,21 @@
 #    completamente la búsqueda.
 # 6. NO se utiliza el total de resultados del buscador.
 # 7. Se consulta el detalle de cada expediente.
-# 8. Se busca primero coincidencia por enlace.
-# 9. Si no existe el enlace, se busca por título + órgano.
-# 10. Si existe con otra fuente, se añade Andalucía a "fuente".
-# 11. Las nuevas licitaciones se marcan como es_novedad=True.
-# 12. Las modificaciones reales se marcan como es_actualizada=True.
-# 13. Añadir Andalucía como fuente NO se considera una actualización.
-# 14. Se genera embedding para las nuevas licitaciones.
-# 15. El CPV se obtiene directamente de "codigosCpv" de Elasticsearch
+# 8. Se comprueba que la licitación permita presentar ofertas.
+# 9. Se busca primero coincidencia por enlace.
+# 10. Si no existe el enlace, se busca por título + órgano.
+# 11. Si existe con otra fuente, se añade Andalucía a "fuente".
+# 12. Las nuevas licitaciones se marcan como es_novedad=True.
+# 13. Las modificaciones reales se marcan como es_actualizada=True.
+# 14. Añadir Andalucía como fuente NO se considera una actualización.
+# 15. Se genera embedding para las nuevas licitaciones.
+# 16. El CPV se obtiene directamente de "codigosCpv" de Elasticsearch
 #     y se guarda únicamente el código, sin la denominación.
+#
+# IMPORTANTE:
+# Solo se guardan licitaciones que actualmente permiten presentar ofertas.
+# Se descartan estados como Resuelto, Formalizado, Adjudicado, Cerrado,
+# Anulado, Desierto, etc., así como licitaciones cuyo plazo ya ha terminado.
 
 
 from datetime import datetime, date, timedelta
@@ -167,7 +173,10 @@ def normalizar_texto(valor):
     }
 
     for origen, destino in reemplazos.items():
-        texto = texto.replace(origen, destino)
+        texto = texto.replace(
+            origen,
+            destino
+        )
 
     return texto
 
@@ -190,7 +199,10 @@ def obtener_valor(data, *claves):
 
     for clave in claves:
 
-        if clave in data and data[clave] is not None:
+        if (
+            clave in data
+            and data[clave] is not None
+        ):
             return data[clave]
 
     return None
@@ -207,7 +219,10 @@ def convertir_importe(valor):
     if valor is None:
         return None
 
-    if isinstance(valor, (int, float)):
+    if isinstance(
+        valor,
+        (int, float)
+    ):
         return float(valor)
 
     texto = limpiar_texto(valor)
@@ -254,10 +269,16 @@ def extraer_fecha(valor):
     if valor is None:
         return None
 
-    if isinstance(valor, datetime):
+    if isinstance(
+        valor,
+        datetime
+    ):
         return valor
 
-    if isinstance(valor, date):
+    if isinstance(
+        valor,
+        date
+    ):
         return datetime.combine(
             valor,
             datetime.min.time()
@@ -299,6 +320,7 @@ def extraer_fecha(valor):
             return fecha
 
         except ValueError:
+
             continue
 
     try:
@@ -345,22 +367,138 @@ def formatear_fecha_supabase(fecha):
     if fecha is None:
         return None
 
-    if isinstance(fecha, datetime):
-        return fecha.strftime("%Y-%m-%d")
+    if isinstance(
+        fecha,
+        datetime
+    ):
+        return fecha.strftime(
+            "%Y-%m-%d"
+        )
 
-    if isinstance(fecha, date):
-        return fecha.strftime("%Y-%m-%d")
+    if isinstance(
+        fecha,
+        date
+    ):
+        return fecha.strftime(
+            "%Y-%m-%d"
+        )
 
-    fecha_convertida = extraer_fecha(fecha)
+    fecha_convertida = extraer_fecha(
+        fecha
+    )
 
     if fecha_convertida is None:
         return None
 
-    return fecha_convertida.strftime("%Y-%m-%d")
+    return fecha_convertida.strftime(
+        "%Y-%m-%d"
+    )
 
 
 # ============================================================
-# 7. FUNCIONES PARA LA FUENTE
+# 7. FILTRO DE ESTADO Y PLAZO
+# ============================================================
+
+def estado_permite_presentar_ofertas(estado):
+    """
+    Devuelve True únicamente si el estado indica que
+    la licitación sigue abierta y permite presentar ofertas.
+
+    Los estados desconocidos se rechazan por seguridad.
+    """
+
+    estado_norm = normalizar_texto(
+        estado
+    )
+
+    if not estado_norm:
+        return False
+
+    # Estados que indican que ya no se pueden presentar ofertas.
+    palabras_bloqueo = (
+        "cerrado",
+        "resuelto",
+        "formalizado",
+        "adjudic",
+        "desierto",
+        "anulado",
+        "finalizado",
+        "desistimiento",
+        "renuncia",
+        "cancelado",
+        "archivado",
+        "suspend"
+    )
+
+    if any(
+        palabra in estado_norm
+        for palabra in palabras_bloqueo
+    ):
+        return False
+
+    # Solo aceptamos estados claramente abiertos.
+    palabras_abierto = (
+        "abierto",
+        "plazo de presentacion",
+        "licitacion abierta"
+    )
+
+    return any(
+        palabra in estado_norm
+        for palabra in palabras_abierto
+    )
+
+
+def puede_presentar_ofertas(datos):
+    """
+    Comprueba si la licitación permite actualmente
+    presentar ofertas.
+
+    Se exige:
+    1. Estado abierto.
+    2. Fecha límite existente.
+    3. Fecha límite igual o posterior a ahora.
+    """
+
+    estado = limpiar_texto(
+        datos.get("estado")
+    )
+
+    if not estado_permite_presentar_ofertas(
+        estado
+    ):
+
+        return (
+            False,
+            "Estado no permite presentar ofertas: "
+            f"{estado or 'desconocido'}"
+        )
+
+    fecha_fin = datos.get(
+        "fecha_fin"
+    )
+
+    if fecha_fin is None:
+
+        return (
+            False,
+            "No tiene fecha límite de presentación"
+        )
+
+    ahora = datetime.now()
+
+    if fecha_fin < ahora:
+
+        return (
+            False,
+            "El plazo de presentación ya ha finalizado"
+        )
+
+    return True, ""
+
+
+# ============================================================
+# 8. FUNCIONES PARA LA FUENTE
 # ============================================================
 
 def obtener_fuentes(fuente):
@@ -383,19 +521,28 @@ def obtener_fuentes(fuente):
     ]
 
 
-def contiene_fuente(fuente, fuente_buscar):
+def contiene_fuente(
+    fuente,
+    fuente_buscar
+):
     """
     Comprueba si una fuente está incluida.
     """
 
-    fuentes = obtener_fuentes(fuente)
+    fuentes = obtener_fuentes(
+        fuente
+    )
 
     for fuente_actual in fuentes:
 
         if (
-            normalizar_texto(fuente_actual)
+            normalizar_texto(
+                fuente_actual
+            )
             ==
-            normalizar_texto(fuente_buscar)
+            normalizar_texto(
+                fuente_buscar
+            )
         ):
 
             return True
@@ -424,11 +571,13 @@ def añadir_fuente(
             nueva_fuente
         )
 
-    return ", ".join(fuentes)
+    return ", ".join(
+        fuentes
+    )
 
 
 # ============================================================
-# 8. ENLACES
+# 9. ENLACES
 # ============================================================
 
 def extraer_codigo_expediente(url):
@@ -466,7 +615,7 @@ def construir_enlace(codigo):
 
 
 # ============================================================
-# 9. NORMALIZACIÓN DE TIPO DE CONTRATO
+# 10. NORMALIZACIÓN DE TIPO DE CONTRATO
 # ============================================================
 
 def normalizar_tipo_contrato(tipo):
@@ -474,7 +623,10 @@ def normalizar_tipo_contrato(tipo):
     Normaliza los tipos de contrato.
     """
 
-    if isinstance(tipo, dict):
+    if isinstance(
+        tipo,
+        dict
+    ):
 
         tipo = obtener_valor(
             tipo,
@@ -484,7 +636,9 @@ def normalizar_tipo_contrato(tipo):
             "name"
         )
 
-    tipo = limpiar_texto(tipo)
+    tipo = limpiar_texto(
+        tipo
+    )
 
     if not tipo:
         return None
@@ -493,26 +647,36 @@ def normalizar_tipo_contrato(tipo):
         tipo
     )
 
-    if tipo_norm.startswith("suministr"):
+    if tipo_norm.startswith(
+        "suministr"
+    ):
         return "Suministro"
 
-    if tipo_norm.startswith("servici"):
+    if tipo_norm.startswith(
+        "servici"
+    ):
         return "Servicios"
 
     if tipo_norm == "obras":
         return "Obras"
 
-    if "concesion de servicios" in tipo_norm:
+    if (
+        "concesion de servicios"
+        in tipo_norm
+    ):
         return "Concesión de servicios"
 
-    if "concesion de obras" in tipo_norm:
+    if (
+        "concesion de obras"
+        in tipo_norm
+    ):
         return "Concesión de obras"
 
     return tipo
 
 
 # ============================================================
-# 10. LUGAR DE EJECUCIÓN
+# 11. LUGAR DE EJECUCIÓN
 # ============================================================
 
 def limpiar_lugar_ejecucion(lugar):
@@ -528,7 +692,10 @@ def limpiar_lugar_ejecucion(lugar):
     if lugar is None:
         return None
 
-    if isinstance(lugar, list):
+    if isinstance(
+        lugar,
+        list
+    ):
 
         valores = []
 
@@ -548,6 +715,7 @@ def limpiar_lugar_ejecucion(lugar):
         for valor in valores:
 
             if valor not in resultado:
+
                 resultado.append(
                     valor
                 )
@@ -558,7 +726,10 @@ def limpiar_lugar_ejecucion(lugar):
             else None
         )
 
-    if isinstance(lugar, dict):
+    if isinstance(
+        lugar,
+        dict
+    ):
 
         lugar = obtener_valor(
             lugar,
@@ -570,7 +741,9 @@ def limpiar_lugar_ejecucion(lugar):
             "provincia"
         )
 
-    texto = limpiar_texto(lugar)
+    texto = limpiar_texto(
+        lugar
+    )
 
     if not texto:
         return None
@@ -601,7 +774,7 @@ def limpiar_lugar_ejecucion(lugar):
 
 
 # ============================================================
-# 11. CPV
+# 12. CPV
 # ============================================================
 
 def extraer_cpv(source):
@@ -609,7 +782,7 @@ def extraer_cpv(source):
     Extrae únicamente los códigos CPV del campo
     "codigosCpv" de Elasticsearch.
 
-    Ejemplo de Elasticsearch:
+    Ejemplo:
 
         "codigosCpv": [
             {
@@ -630,7 +803,10 @@ def extraer_cpv(source):
     La denominación NO se guarda.
     """
 
-    if not isinstance(source, dict):
+    if not isinstance(
+        source,
+        dict
+    ):
         return None
 
     cpv_raw = source.get(
@@ -687,7 +863,7 @@ def extraer_cpv(source):
 
 
 # ============================================================
-# 12. TEXTO RECURSIVO
+# 13. TEXTO RECURSIVO
 # ============================================================
 
 def extraer_texto_recursivo(obj):
@@ -701,7 +877,10 @@ def extraer_texto_recursivo(obj):
     if obj is None:
         return partes
 
-    if isinstance(obj, dict):
+    if isinstance(
+        obj,
+        dict
+    ):
 
         for clave, valor in obj.items():
 
@@ -740,7 +919,10 @@ def extraer_texto_recursivo(obj):
                         f"{texto}"
                     )
 
-    elif isinstance(obj, list):
+    elif isinstance(
+        obj,
+        list
+    ):
 
         for elemento in obj:
 
@@ -766,7 +948,7 @@ def extraer_texto_recursivo(obj):
 
 
 # ============================================================
-# 13. PETICIONES A ELASTICSEARCH
+# 14. PETICIONES A ELASTICSEARCH
 # ============================================================
 
 def consultar_elasticsearch(
@@ -810,10 +992,12 @@ def consultar_elasticsearch(
 
 
 # ============================================================
-# 14. OBTENER UNA PÁGINA DEL BUSCADOR
+# 15. OBTENER UNA PÁGINA DEL BUSCADOR
 # ============================================================
 
-def obtener_pagina_busqueda(desde):
+def obtener_pagina_busqueda(
+    desde
+):
     """
     Obtiene una página del buscador de Andalucía.
 
@@ -863,7 +1047,7 @@ def obtener_pagina_busqueda(desde):
 
 
 # ============================================================
-# 15. OBTENER DETALLE
+# 16. OBTENER DETALLE
 # ============================================================
 
 def obtener_detalle(
@@ -876,7 +1060,9 @@ def obtener_detalle(
     payload = {
         "query": {
             "match": {
-                "_id": str(codigo_expediente)
+                "_id": str(
+                    codigo_expediente
+                )
             }
         }
     }
@@ -888,7 +1074,7 @@ def obtener_detalle(
 
 
 # ============================================================
-# 16. EXTRAER HITS
+# 17. EXTRAER HITS
 # ============================================================
 
 def extraer_hits_busqueda(
@@ -998,7 +1184,9 @@ def extraer_codigo_hit(
 
     if codigo is not None:
 
-        return str(codigo)
+        return str(
+            codigo
+        )
 
     codigo = hit.get(
         "_id"
@@ -1006,13 +1194,15 @@ def extraer_codigo_hit(
 
     if codigo is not None:
 
-        return str(codigo)
+        return str(
+            codigo
+        )
 
     return None
 
 
 # ============================================================
-# 17. OBTENER LICITACIONES DE LOS ÚLTIMOS 3 DÍAS
+# 18. OBTENER LICITACIONES DE LOS ÚLTIMOS 3 DÍAS
 # ============================================================
 
 def obtener_licitaciones_ultimos_tres_dias():
@@ -1231,7 +1421,7 @@ def obtener_licitaciones_ultimos_tres_dias():
 
 
 # ============================================================
-# 18. CARGAR LICITACIONES EXISTENTES DE SUPABASE
+# 19. CARGAR LICITACIONES EXISTENTES DE SUPABASE
 # ============================================================
 
 def cargar_licitaciones_existentes():
@@ -1345,7 +1535,7 @@ def cargar_licitaciones_existentes():
 
 
 # ============================================================
-# 19. GENERAR EMBEDDING
+# 20. GENERAR EMBEDDING
 # ============================================================
 
 def generar_embedding(
@@ -1358,39 +1548,51 @@ def generar_embedding(
 
     partes = []
 
-    if registro.get("titulo"):
+    if registro.get(
+        "titulo"
+    ):
 
         partes.append(
             f"Título: {registro['titulo']}"
         )
 
-    if registro.get("organo"):
+    if registro.get(
+        "organo"
+    ):
 
         partes.append(
             f"Órgano: {registro['organo']}"
         )
 
-    if registro.get("tipo_contrato"):
+    if registro.get(
+        "tipo_contrato"
+    ):
 
         partes.append(
             "Tipo de contrato: "
             f"{registro['tipo_contrato']}"
         )
 
-    if registro.get("cpv"):
+    if registro.get(
+        "cpv"
+    ):
 
         partes.append(
             f"CPV: {registro['cpv']}"
         )
 
-    if registro.get("lugar_ejecucion"):
+    if registro.get(
+        "lugar_ejecucion"
+    ):
 
         partes.append(
             "Lugar de ejecución: "
             f"{registro['lugar_ejecucion']}"
         )
 
-    if registro.get("texto_completo"):
+    if registro.get(
+        "texto_completo"
+    ):
 
         partes.append(
             registro["texto_completo"]
@@ -1423,7 +1625,7 @@ def generar_embedding(
 
 
 # ============================================================
-# 20. COMPARAR CAMBIOS
+# 21. COMPARAR CAMBIOS
 # ============================================================
 
 def valores_diferentes(
@@ -1477,6 +1679,7 @@ def valores_diferentes(
             TypeError,
             ValueError
         ):
+
             return True
 
     return (
@@ -1542,7 +1745,7 @@ def hay_cambios_reales(
 
 
 # ============================================================
-# 21. PREPARAR REGISTRO PARA SUPABASE
+# 22. PREPARAR REGISTRO PARA SUPABASE
 # ============================================================
 
 def preparar_registro_supabase(
@@ -1554,16 +1757,28 @@ def preparar_registro_supabase(
     """
 
     registro = {
-        "enlace": datos.get("enlace"),
-        "titulo": datos.get("titulo"),
-        "organo": datos.get("organo"),
+        "enlace": datos.get(
+            "enlace"
+        ),
+        "titulo": datos.get(
+            "titulo"
+        ),
+        "organo": datos.get(
+            "organo"
+        ),
         "fuente": FUENTE,
         "fecha": formatear_fecha_supabase(
             datos.get("fecha")
         ),
-        "importe": datos.get("importe"),
-        "tipo_contrato": datos.get("tipo_contrato"),
-        "cpv": datos.get("cpv"),
+        "importe": datos.get(
+            "importe"
+        ),
+        "tipo_contrato": datos.get(
+            "tipo_contrato"
+        ),
+        "cpv": datos.get(
+            "cpv"
+        ),
         "fecha_fin": formatear_fecha_supabase(
             datos.get("fecha_fin")
         ),
@@ -1585,7 +1800,7 @@ def preparar_registro_supabase(
 
 
 # ============================================================
-# 22. EXTRAER DATOS DEL DETALLE
+# 23. EXTRAER DATOS DEL DETALLE
 # ============================================================
 
 def extraer_datos_detalle(
@@ -1694,26 +1909,6 @@ def extraer_datos_detalle(
     # --------------------------------------------------------
     # CPV
     # --------------------------------------------------------
-    #
-    # Elasticsearch proporciona directamente:
-    #
-    # "codigosCpv": [
-    #     {
-    #         "codigo": "50850000-8",
-    #         "denominacion":
-    #             "Servicios de reparación..."
-    #     }
-    # ]
-    #
-    # Se guarda únicamente:
-    #
-    # "50850000-8"
-    #
-    # Si hay varios:
-    #
-    # "50850000-8, 30213100-6"
-    #
-    # No se guarda la denominación.
 
     cpv = extraer_cpv(
         source
@@ -1733,6 +1928,33 @@ def extraer_datos_detalle(
 
     fecha_fin = extraer_fecha(
         fecha_fin
+    )
+
+    # --------------------------------------------------------
+    # Estado
+    # --------------------------------------------------------
+
+    estado = obtener_valor(
+        source,
+        "estado"
+    )
+
+    if isinstance(
+        estado,
+        dict
+    ):
+
+        estado = obtener_valor(
+            estado,
+            "nombre",
+            "descripcion",
+            "description",
+            "name"
+        )
+
+    estado = (
+        limpiar_texto(estado)
+        or None
     )
 
     # --------------------------------------------------------
@@ -1788,6 +2010,7 @@ def extraer_datos_detalle(
         "cpv": cpv,
         "fecha_fin": fecha_fin,
         "lugar_ejecucion": lugar,
+        "estado": estado,
         "texto_completo": (
             texto_completo
             if texto_completo
@@ -1797,7 +2020,7 @@ def extraer_datos_detalle(
 
 
 # ============================================================
-# 23. PROCESAR UNA LICITACIÓN
+# 24. PROCESAR UNA LICITACIÓN
 # ============================================================
 
 def procesar_licitacion(
@@ -2103,7 +2326,7 @@ def procesar_licitacion(
 
 
 # ============================================================
-# 24. MAIN
+# 25. MAIN
 # ============================================================
 
 def main():
@@ -2182,7 +2405,8 @@ def main():
         "actualizadas": 0,
         "existentes": 0,
         "duplicadas": 0,
-        "errores": 0
+        "errores": 0,
+        "descartadas_no_presentables": 0
     }
 
     # ========================================================
@@ -2315,6 +2539,11 @@ def main():
         )
 
         print(
+            "    Estado: "
+            f"{datos.get('estado')}"
+        )
+
+        print(
             "    Tipo contrato: "
             f"{datos.get('tipo_contrato')}"
         )
@@ -2342,6 +2571,33 @@ def main():
         print(
             "    Enlace: "
             f"{datos.get('enlace')}"
+        )
+
+        # ====================================================
+        # COMPROBAR SI SE PUEDEN PRESENTAR OFERTAS
+        # ====================================================
+
+        puede_presentar, motivo = (
+            puede_presentar_ofertas(
+                datos
+            )
+        )
+
+        if not puede_presentar:
+
+            contadores[
+                "descartadas_no_presentables"
+            ] += 1
+
+            print(
+                "    [DESCARTADA] "
+                f"{motivo}"
+            )
+
+            continue
+
+        print(
+            "    [VÁLIDA] Permite presentar ofertas."
         )
 
         # ====================================================
@@ -2401,6 +2657,11 @@ def main():
     )
 
     print(
+        "Descartadas por estado/plazo: "
+        f"{contadores['descartadas_no_presentables']}"
+    )
+
+    print(
         "Errores: "
         f"{contadores['errores']}"
     )
@@ -2418,7 +2679,7 @@ def main():
 
 
 # ============================================================
-# 25. EJECUCIÓN
+# 26. EJECUCIÓN
 # ============================================================
 
 if __name__ == "__main__":
