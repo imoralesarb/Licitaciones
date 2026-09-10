@@ -27,6 +27,7 @@ import time
 import re
 
 import requests
+from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from sentence_transformers import SentenceTransformer
 
@@ -602,11 +603,21 @@ def limpiar_lugar_ejecucion(lugar):
 
 def extraer_cpv(cpv):
     """
-    Extrae el CPV de diferentes estructuras.
+    Extrae únicamente el código numérico CPV.
+
+    Ejemplo:
+        "50850000-8 Servicios de reparación y mantenimiento de mobiliario"
+        -> "50850000-8"
+
+    Si hay varios CPV, devuelve todos separados por coma.
     """
 
     if cpv is None:
         return None
+
+    # --------------------------------------------------------
+    # Si es una lista
+    # --------------------------------------------------------
 
     if isinstance(cpv, list):
 
@@ -614,72 +625,206 @@ def extraer_cpv(cpv):
 
         for elemento in cpv:
 
-            valor = extraer_cpv(
-                elemento
-            )
+            valor = extraer_cpv(elemento)
 
             if valor:
-                valores.append(
-                    valor
-                )
+                valores.append(valor)
 
         resultado = []
 
         for valor in valores:
 
-            if valor not in resultado:
-                resultado.append(
-                    valor
-                )
+            for codigo in valor.split(","):
 
-        return (
-            ", ".join(resultado)
-            if resultado
-            else None
-        )
+                codigo = codigo.strip()
+
+                if codigo and codigo not in resultado:
+                    resultado.append(codigo)
+
+        return ", ".join(resultado) if resultado else None
+
+    # --------------------------------------------------------
+    # Si es un diccionario
+    # --------------------------------------------------------
 
     if isinstance(cpv, dict):
 
-        codigo = obtener_valor(
-            cpv,
-            "codigo",
-            "code",
-            "codigoCPV",
-            "cpv"
-        )
+        valores = []
 
-        descripcion = obtener_valor(
-            cpv,
-            "descripcion",
-            "description",
-            "nombre",
-            "name"
-        )
+        for clave, valor in cpv.items():
 
-        if codigo and descripcion:
+            if valor is None:
+                continue
 
-            return (
-                f"{limpiar_texto(codigo)} - "
-                f"{limpiar_texto(descripcion)}"
-            )
+            extraido = extraer_cpv(valor)
 
-        if codigo:
+            if extraido:
+                valores.append(extraido)
 
-            return limpiar_texto(
-                codigo
-            )
+        resultado = []
 
-        if descripcion:
+        for valor in valores:
 
-            return limpiar_texto(
-                descripcion
-            )
+            for codigo in valor.split(","):
 
-        return None
+                codigo = codigo.strip()
+
+                if codigo and codigo not in resultado:
+                    resultado.append(codigo)
+
+        return ", ".join(resultado) if resultado else None
+
+    # --------------------------------------------------------
+    # Si es texto
+    # --------------------------------------------------------
 
     texto = limpiar_texto(cpv)
 
-    return texto or None
+    if not texto:
+        return None
+
+    # Busca códigos CPV del tipo:
+    # 50850000-8
+    # 30213100-6
+    # 45210000-2
+
+    codigos = re.findall(
+        r"\b\d{8}-\d\b",
+        texto
+    )
+
+    if not codigos:
+        return None
+
+    # Eliminar duplicados manteniendo el orden
+
+    resultado = []
+
+    for codigo in codigos:
+
+        if codigo not in resultado:
+            resultado.append(codigo)
+
+    return ", ".join(resultado)
+
+
+def extraer_cpv_html(codigo_expediente):
+    """
+    Extrae el código CPV directamente del HTML
+    de la página pública del expediente.
+
+    Ejemplo:
+        50850000-8 Servicios de reparación y mantenimiento de mobiliario
+        -> 50850000-8
+    """
+
+    enlace = construir_enlace(
+        codigo_expediente
+    )
+
+    if not enlace:
+        return None
+
+    try:
+
+        respuesta = session.get(
+            enlace,
+            timeout=60
+        )
+
+        respuesta.raise_for_status()
+
+    except requests.RequestException as e:
+
+        print(
+            "    [AVISO] No se pudo consultar "
+            f"el HTML para CPV: {e}"
+        )
+
+        return None
+
+    try:
+
+        soup = BeautifulSoup(
+            respuesta.text,
+            "html.parser"
+        )
+
+    except Exception as e:
+
+        print(
+            "    [AVISO] No se pudo interpretar "
+            f"el HTML para CPV: {e}"
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # Buscar los bloques de información
+    # --------------------------------------------------------
+
+    bloques = soup.select(
+        ".block"
+    )
+
+    for bloque in bloques:
+
+        etiqueta = bloque.select_one(
+            ".field__label"
+        )
+
+        if not etiqueta:
+            continue
+
+        texto_etiqueta = normalizar_texto(
+            etiqueta.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        # Buscamos exactamente:
+        # Clasificación CPV
+
+        if texto_etiqueta != "clasificacion cpv":
+            continue
+
+        texto_bloque = bloque.get_text(
+            " ",
+            strip=True
+        )
+
+        # Extraer SOLO códigos CPV.
+        #
+        # Ejemplo:
+        # 50850000-8 Servicios de reparación...
+        #
+        # Resultado:
+        # 50850000-8
+
+        codigos = re.findall(
+            r"\b\d{8}-\d\b",
+            texto_bloque
+        )
+
+        if not codigos:
+            return None
+
+        resultado = []
+
+        for codigo in codigos:
+
+            if codigo not in resultado:
+
+                resultado.append(
+                    codigo
+                )
+
+        return ", ".join(
+            resultado
+        )
+
+    return None
 
 
 # ============================================================
@@ -1466,952 +1611,3 @@ def valores_diferentes(
                     valor_nuevo
                     - float(valor_antiguo)
                 )
-                > 0.000001
-            )
-
-        except (
-            TypeError,
-            ValueError
-        ):
-            return True
-
-    return (
-        str(valor_nuevo).strip()
-        !=
-        str(valor_antiguo).strip()
-    )
-
-
-def hay_cambios_reales(
-    nuevo,
-    existente
-):
-    """
-    Comprueba si han cambiado datos reales.
-
-    El campo "fuente" no se considera aquí.
-    """
-
-    campos = [
-        "titulo",
-        "organo",
-        "fecha",
-        "importe",
-        "tipo_contrato",
-        "cpv",
-        "fecha_fin",
-        "lugar_ejecucion",
-        "texto_completo"
-    ]
-
-    for campo in campos:
-
-        valor_nuevo = nuevo.get(
-            campo
-        )
-
-        valor_antiguo = existente.get(
-            campo
-        )
-
-        if isinstance(
-            valor_nuevo,
-            (datetime, date)
-        ):
-
-            valor_nuevo = (
-                formatear_fecha_supabase(
-                    valor_nuevo
-                )
-            )
-
-        if isinstance(
-            valor_antiguo,
-            (datetime, date)
-        ):
-
-            valor_antiguo = (
-                formatear_fecha_supabase(
-                    valor_antiguo
-                )
-            )
-
-        if valores_diferentes(
-            valor_nuevo,
-            valor_antiguo
-        ):
-
-            return True
-
-    return False
-
-
-# ============================================================
-# 21. PREPARAR REGISTRO PARA SUPABASE
-# ============================================================
-
-def preparar_registro_supabase(
-    datos,
-    embedding=None
-):
-    """
-    Prepara una nueva licitación para Supabase.
-    """
-
-    registro = {
-        "enlace": datos.get("enlace"),
-        "titulo": datos.get("titulo"),
-        "organo": datos.get("organo"),
-        "fuente": FUENTE,
-        "fecha": formatear_fecha_supabase(
-            datos.get("fecha")
-        ),
-        "importe": datos.get("importe"),
-        "tipo_contrato": datos.get("tipo_contrato"),
-        "cpv": datos.get("cpv"),
-        "fecha_fin": formatear_fecha_supabase(
-            datos.get("fecha_fin")
-        ),
-        "lugar_ejecucion": datos.get(
-            "lugar_ejecucion"
-        ),
-        "texto_completo": datos.get(
-            "texto_completo"
-        ),
-        "es_novedad": True,
-        "es_actualizada": False
-    }
-
-    if embedding is not None:
-
-        registro["embedding"] = embedding
-
-    return registro
-
-
-# ============================================================
-# 22. EXTRAER DATOS DEL DETALLE
-# ============================================================
-
-def extraer_datos_detalle(
-    respuesta,
-    codigo_expediente,
-    fecha_publicacion
-):
-    """
-    Extrae los datos principales del detalle.
-    """
-
-    if not respuesta:
-        return None
-
-    hits = (
-        respuesta
-        .get(
-            "hits",
-            {}
-        )
-        .get(
-            "hits",
-            []
-        )
-    )
-
-    if not hits:
-        return None
-
-    hit = hits[0]
-
-    source = hit.get(
-        "_source",
-        {}
-    )
-
-    if not isinstance(
-        source,
-        dict
-    ):
-        return None
-
-    # --------------------------------------------------------
-    # Título
-    # --------------------------------------------------------
-
-    titulo = obtener_valor(
-        source,
-        "titulo",
-        "tituloExpediente",
-        "nombre"
-    )
-
-    # --------------------------------------------------------
-    # Órgano
-    # --------------------------------------------------------
-
-    organo = obtener_valor(
-        source,
-        "organo",
-        "organoContratacion",
-        "perfilContratante"
-    )
-
-    if isinstance(
-        organo,
-        dict
-    ):
-
-        organo = obtener_valor(
-            organo,
-            "descripcion",
-            "description",
-            "nombre"
-        )
-
-    # --------------------------------------------------------
-    # Tipo de contrato
-    # --------------------------------------------------------
-
-    tipo_contrato = obtener_valor(
-        source,
-        "tipoContrato"
-    )
-
-    tipo_contrato = normalizar_tipo_contrato(
-        tipo_contrato
-    )
-
-    # --------------------------------------------------------
-    # Importe
-    # --------------------------------------------------------
-
-    importe = obtener_valor(
-        source,
-        "importeLicitacion",
-        "importe",
-        "importeSinIVA",
-        "importeLicitacionSinIVA"
-    )
-
-    importe = convertir_importe(
-        importe
-    )
-
-    # --------------------------------------------------------
-    # CPV
-    # --------------------------------------------------------
-
-    cpv = obtener_valor(
-        source,
-        "cpv",
-        "clasificacionCPV",
-        "clasificacionCpv",
-        "codigoCPV"
-    )
-
-    cpv = extraer_cpv(
-        cpv
-    )
-
-    # --------------------------------------------------------
-    # Fecha límite de presentación
-    # --------------------------------------------------------
-
-    fecha_fin = obtener_valor(
-        source,
-        "fechaLimitePresentacion",
-        "fechaFin",
-        "fechaFinPresentacion",
-        "fechaLimite"
-    )
-
-    fecha_fin = extraer_fecha(
-        fecha_fin
-    )
-
-    # --------------------------------------------------------
-    # Lugar
-    # --------------------------------------------------------
-
-    lugar = obtener_valor(
-        source,
-        "lugarEjecucion",
-        "lugar",
-        "ubicacion"
-    )
-
-    lugar = limpiar_lugar_ejecucion(
-        lugar
-    )
-
-    # --------------------------------------------------------
-    # Enlace
-    # --------------------------------------------------------
-
-    enlace = construir_enlace(
-        codigo_expediente
-    )
-
-    # --------------------------------------------------------
-    # Texto completo
-    # --------------------------------------------------------
-
-    partes_texto = (
-        extraer_texto_recursivo(
-            source
-        )
-    )
-
-    texto_completo = "\n".join(
-        partes_texto
-    )
-
-    return {
-        "enlace": enlace,
-        "titulo": (
-            limpiar_texto(titulo)
-            or None
-        ),
-        "organo": (
-            limpiar_texto(organo)
-            or None
-        ),
-        "fecha": fecha_publicacion,
-        "importe": importe,
-        "tipo_contrato": tipo_contrato,
-        "cpv": cpv,
-        "fecha_fin": fecha_fin,
-        "lugar_ejecucion": lugar,
-        "texto_completo": (
-            texto_completo
-            if texto_completo
-            else None
-        )
-    }
-
-
-# ============================================================
-# 23. PROCESAR UNA LICITACIÓN
-# ============================================================
-
-def procesar_licitacion(
-    datos,
-    por_enlace,
-    por_titulo_organo,
-    modelo,
-    contadores
-):
-    """
-    Inserta o actualiza una licitación.
-    """
-
-    enlace = limpiar_texto(
-        datos.get("enlace")
-    )
-
-    titulo = limpiar_texto(
-        datos.get("titulo")
-    )
-
-    organo = limpiar_texto(
-        datos.get("organo")
-    )
-
-    if not enlace:
-
-        contadores["errores"] += 1
-
-        print(
-            "  [ERROR] La licitación no tiene enlace."
-        )
-
-        return
-
-    # ========================================================
-    # BUSCAR POR ENLACE
-    # ========================================================
-
-    existente = por_enlace.get(
-        enlace
-    )
-
-    # ========================================================
-    # BUSCAR POR TÍTULO + ÓRGANO
-    # ========================================================
-
-    if existente is None and titulo:
-
-        clave = (
-            normalizar_texto(titulo),
-            normalizar_organo(organo)
-        )
-
-        existente = (
-            por_titulo_organo.get(
-                clave
-            )
-        )
-
-        if existente is not None:
-
-            contadores["duplicadas"] += 1
-
-            print(
-                "  [DUPLICADA] Coincidencia "
-                "por título + órgano."
-            )
-
-    # ========================================================
-    # NUEVA
-    # ========================================================
-
-    if existente is None:
-
-        print(
-            "  [NUEVA] No existe en Supabase."
-        )
-
-        embedding = generar_embedding(
-            datos,
-            modelo
-        )
-
-        registro = preparar_registro_supabase(
-            datos,
-            embedding
-        )
-
-        try:
-
-            respuesta = (
-                supabase
-                .table("licitaciones")
-                .insert(
-                    registro
-                )
-                .execute()
-            )
-
-            insertados = (
-                respuesta.data
-                or []
-            )
-
-            if not insertados:
-
-                contadores["errores"] += 1
-
-                print(
-                    "  [ERROR] Supabase no devolvió "
-                    "el registro insertado."
-                )
-
-                return
-
-            nuevo_registro = insertados[0]
-
-            por_enlace[
-                enlace
-            ] = nuevo_registro
-
-            clave = (
-                normalizar_texto(titulo),
-                normalizar_organo(organo)
-            )
-
-            if titulo:
-
-                por_titulo_organo[
-                    clave
-                ] = nuevo_registro
-
-            contadores["nuevas"] += 1
-
-            print(
-                "  [INSERTADA] Licitación nueva."
-            )
-
-        except Exception as e:
-
-            contadores["errores"] += 1
-
-            print(
-                "  [ERROR] Insertando en Supabase: "
-                f"{e}"
-            )
-
-        return
-
-    # ========================================================
-    # EXISTENTE
-    # ========================================================
-
-    fuente_actual = existente.get(
-        "fuente"
-    )
-
-    tiene_andalucia = contiene_fuente(
-        fuente_actual,
-        FUENTE
-    )
-
-    cambios = hay_cambios_reales(
-        datos,
-        existente
-    )
-
-    actualizacion = {}
-
-    # --------------------------------------------------------
-    # Actualizar datos reales
-    # --------------------------------------------------------
-
-    if cambios:
-
-        campos_actualizables = [
-            "titulo",
-            "organo",
-            "fecha",
-            "importe",
-            "tipo_contrato",
-            "cpv",
-            "fecha_fin",
-            "lugar_ejecucion",
-            "texto_completo"
-        ]
-
-        for campo in campos_actualizables:
-
-            valor = datos.get(
-                campo
-            )
-
-            if campo in {
-                "fecha",
-                "fecha_fin"
-            }:
-
-                valor = formatear_fecha_supabase(
-                    valor
-                )
-
-            actualizacion[
-                campo
-            ] = valor
-
-        actualizacion[
-            "es_actualizada"
-        ] = True
-
-        contadores["actualizadas"] += 1
-
-        print(
-            "  [ACTUALIZADA] Han cambiado "
-            "datos reales."
-        )
-
-    # --------------------------------------------------------
-    # Añadir Andalucía como fuente
-    # --------------------------------------------------------
-
-    if not tiene_andalucia:
-
-        nueva_fuente = añadir_fuente(
-            fuente_actual,
-            FUENTE
-        )
-
-        actualizacion[
-            "fuente"
-        ] = nueva_fuente
-
-        print(
-            "  [FUENTE] Añadida Andalucía."
-        )
-
-    # --------------------------------------------------------
-    # Si solo se añadió la fuente,
-    # NO se marca como actualización.
-    # --------------------------------------------------------
-
-    if not actualizacion:
-
-        contadores["existentes"] += 1
-
-        print(
-            "  [SIN CAMBIOS] Ya existe."
-        )
-
-        return
-
-    # ========================================================
-    # ACTUALIZAR SUPABASE
-    # ========================================================
-
-    try:
-
-        (
-            supabase
-            .table("licitaciones")
-            .update(actualizacion)
-            .eq(
-                "id",
-                existente["id"]
-            )
-            .execute()
-        )
-
-        # Actualizar también los índices en memoria.
-
-        existente_actualizado = dict(
-            existente
-        )
-
-        existente_actualizado.update(
-            actualizacion
-        )
-
-        por_enlace[
-            enlace
-        ] = existente_actualizado
-
-        clave = (
-            normalizar_texto(titulo),
-            normalizar_organo(organo)
-        )
-
-        if titulo:
-
-            por_titulo_organo[
-                clave
-            ] = existente_actualizado
-
-    except Exception as e:
-
-        contadores["errores"] += 1
-
-        print(
-            "  [ERROR] Actualizando Supabase: "
-            f"{e}"
-        )
-
-
-# ============================================================
-# 24. MAIN
-# ============================================================
-
-def main():
-
-    inicio_tiempo = time.time()
-
-    print()
-    print("=" * 70)
-    print(
-        "SINCRONIZACIÓN DE LICITACIONES - ANDALUCÍA"
-    )
-    print("=" * 70)
-
-    # ========================================================
-    # OBTENER LICITACIONES RECIENTES
-    # ========================================================
-
-    resultados = (
-        obtener_licitaciones_ultimos_tres_dias()
-    )
-
-    if not resultados:
-
-        print()
-        print(
-            "No se han encontrado licitaciones "
-            "para procesar."
-        )
-
-        return
-
-    # ========================================================
-    # CARGAR SUPABASE
-    # ========================================================
-
-    (
-        registros_existentes,
-        por_enlace,
-        por_titulo_organo
-    ) = cargar_licitaciones_existentes()
-
-    # ========================================================
-    # CARGAR MODELO
-    # ========================================================
-
-    print()
-    print("=" * 70)
-    print("CARGANDO MODELO DE EMBEDDINGS")
-    print("=" * 70)
-
-    try:
-
-        modelo = SentenceTransformer(
-            MODELO_EMBEDDING
-        )
-
-        print(
-            "Modelo cargado correctamente."
-        )
-
-    except Exception as e:
-
-        print(
-            "ERROR cargando modelo de embeddings: "
-            f"{e}"
-        )
-
-        return
-
-    # ========================================================
-    # CONTADORES
-    # ========================================================
-
-    contadores = {
-        "nuevas": 0,
-        "actualizadas": 0,
-        "existentes": 0,
-        "duplicadas": 0,
-        "errores": 0
-    }
-
-    # ========================================================
-    # PROCESAR RESULTADOS
-    # ========================================================
-
-    print()
-    print("=" * 70)
-    print("PROCESANDO LICITACIONES")
-    print("=" * 70)
-
-    procesadas = set()
-
-    for indice, resultado in enumerate(
-        resultados,
-        start=1
-    ):
-
-        hit = resultado.get(
-            "hit"
-        )
-
-        codigo = resultado.get(
-            "codigo"
-        )
-
-        fecha_publicacion = resultado.get(
-            "fecha_publicacion"
-        )
-
-        if not codigo:
-
-            contadores["errores"] += 1
-
-            print(
-                f"[{indice}/{len(resultados)}] "
-                "Sin identificador de expediente."
-            )
-
-            continue
-
-        # ====================================================
-        # EVITAR DUPLICADOS EN LA PROPIA RESPUESTA
-        # ====================================================
-
-        if codigo in procesadas:
-
-            contadores["duplicadas"] += 1
-
-            print(
-                f"[{indice}/{len(resultados)}] "
-                f"Expediente {codigo}: "
-                "duplicado en la consulta."
-            )
-
-            continue
-
-        procesadas.add(
-            codigo
-        )
-
-        print()
-        print(
-            f"[{indice}/{len(resultados)}] "
-            f"Expediente: {codigo}"
-        )
-
-        print(
-            "    Fecha publicación: "
-            f"{formatear_fecha_supabase(fecha_publicacion)}"
-        )
-
-        # ====================================================
-        # OBTENER DETALLE
-        # ====================================================
-
-        respuesta_detalle = (
-            obtener_detalle(
-                codigo
-            )
-        )
-
-        if respuesta_detalle is None:
-
-            contadores["errores"] += 1
-
-            print(
-                "    [ERROR] No se pudo obtener "
-                "el detalle."
-            )
-
-            continue
-
-        # ====================================================
-        # EXTRAER DATOS
-        # ====================================================
-
-        datos = (
-            extraer_datos_detalle(
-                respuesta_detalle,
-                codigo,
-                fecha_publicacion
-            )
-        )
-
-        if datos is None:
-
-            contadores["errores"] += 1
-
-            print(
-                "    [ERROR] No se pudieron extraer "
-                "los datos del detalle."
-            )
-
-            continue
-
-        # ====================================================
-        # MOSTRAR INFORMACIÓN PRINCIPAL
-        # ====================================================
-
-        print(
-            "    Título: "
-            f"{datos.get('titulo')}"
-        )
-
-        print(
-            "    Órgano: "
-            f"{datos.get('organo')}"
-        )
-
-        print(
-            "    Tipo contrato: "
-            f"{datos.get('tipo_contrato')}"
-        )
-
-        print(
-            "    Importe: "
-            f"{datos.get('importe')}"
-        )
-
-        print(
-            "    CPV: "
-            f"{datos.get('cpv')}"
-        )
-
-        print(
-            "    Fecha fin: "
-            f"{formatear_fecha_supabase(datos.get('fecha_fin'))}"
-        )
-
-        print(
-            "    Lugar: "
-            f"{datos.get('lugar_ejecucion')}"
-        )
-
-        print(
-            "    Enlace: "
-            f"{datos.get('enlace')}"
-        )
-
-        # ====================================================
-        # SINCRONIZAR
-        # ====================================================
-
-        procesar_licitacion(
-            datos,
-            por_enlace,
-            por_titulo_organo,
-            modelo,
-            contadores
-        )
-
-        time.sleep(
-            PAUSA_ENTRE_PETICIONES
-        )
-
-    # ========================================================
-    # RESUMEN
-    # ========================================================
-
-    tiempo_total = (
-        time.time()
-        - inicio_tiempo
-    )
-
-    print()
-    print("=" * 70)
-    print("RESUMEN DE SINCRONIZACIÓN")
-    print("=" * 70)
-
-    print(
-        "Licitaciones publicadas en los "
-        "últimos 3 días: "
-        f"{len(resultados)}"
-    )
-
-    print(
-        "Nuevas insertadas: "
-        f"{contadores['nuevas']}"
-    )
-
-    print(
-        "Actualizadas: "
-        f"{contadores['actualizadas']}"
-    )
-
-    print(
-        "Ya existentes sin cambios: "
-        f"{contadores['existentes']}"
-    )
-
-    print(
-        "Duplicadas: "
-        f"{contadores['duplicadas']}"
-    )
-
-    print(
-        "Errores: "
-        f"{contadores['errores']}"
-    )
-
-    print(
-        "Tiempo total: "
-        f"{tiempo_total:.2f} segundos"
-    )
-
-    print("=" * 70)
-    print(
-        "SINCRONIZACIÓN FINALIZADA"
-    )
-    print("=" * 70)
-
-
-# ============================================================
-# 25. EJECUCIÓN
-# ============================================================
-
-if __name__ == "__main__":
-    main()
