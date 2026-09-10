@@ -545,8 +545,18 @@ def aplicar_filtros_comunes(df):
      #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
      #   df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
     # 1. Filtro de fuente
-    # 1. Filtro de fuente
+    # 1. Filtro de fuente - DEBUG
     if filtro_fuente:
+        st.write("FILTRO SELECCIONADO:", [repr(f) for f in filtro_fuente])
+    
+        fuentes_navarra = df[
+            df["fuente"]
+            .astype(str)
+            .str.contains("Navarra", case=False, na=False)
+        ]["fuente"].unique()
+    
+        st.write("FUENTES CON NAVARRA:", [repr(f) for f in fuentes_navarra])
+    
         fuentes_seleccionadas = [
             f.strip().casefold()
             for f in filtro_fuente
