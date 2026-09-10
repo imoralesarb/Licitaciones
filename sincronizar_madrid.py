@@ -116,7 +116,7 @@ def traducir_tipo_contrato_madrid(codigo_raw):
 
 def sincronizar_licitaciones_madrid():
     hoy = datetime.now().date()
-    ayer = hoy - timedelta(days=1)
+    ayer = hoy - timedelta(days=2)
     fecha_inicio_rango = ayer
     fecha_fin_rango = hoy
 
