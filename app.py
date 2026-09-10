@@ -540,22 +540,8 @@ def aplicar_filtros_comunes(df):
     if df.empty:
         return df
 
-    st.write("INICIO:", len(df))
-
     # 1. Filtro de fuente
     if filtro_fuente:
-        for fuente in filtro_fuente:
-            st.write(
-                f"FUENTE '{fuente}':",
-                df["fuente"].astype(str).str.contains(
-                    fuente,
-                    case=False,
-                    na=False,
-                    regex=False
-                ).sum(),
-                "coincidencias"
-            )
-
         df = df[
             df["fuente"]
             .fillna("")
@@ -567,8 +553,6 @@ def aplicar_filtros_comunes(df):
                 )
             )
         ]
-
-    st.write("DESPUÉS FUENTE:", len(df))
 
     # 2. Filtro de tipo de contrato
     if filtro_tipo_contrato:
@@ -585,16 +569,12 @@ def aplicar_filtros_comunes(df):
                 )
             ]
 
-    st.write("DESPUÉS TIPO CONTRATO:", len(df))
-
     # 3. Importes
     if importe_min > 0:
         df = df[df["importe"] >= importe_min]
 
     if importe_max > 0:
         df = df[df["importe"] <= importe_max]
-
-    st.write("DESPUÉS IMPORTE:", len(df))
 
     # 4. CCAA
     if filtro_ccaa:
@@ -623,8 +603,6 @@ def aplicar_filtros_comunes(df):
             )
         ]
 
-    st.write("DESPUÉS CCAA:", len(df))
-
     # 5. Lugar libre
     if filtro_lugar_libre.strip():
         df = df[
@@ -634,8 +612,6 @@ def aplicar_filtros_comunes(df):
                 na=False
             )
         ]
-
-    st.write("DESPUÉS LUGAR LIBRE:", len(df))
 
     # 6. Sector CPV
     if filtro_cpv_sector:
@@ -667,8 +643,6 @@ def aplicar_filtros_comunes(df):
         if "cpv" in df.columns:
             df = df[df["cpv"].apply(coincide_cpv)]
 
-    st.write("DESPUÉS SECTOR CPV:", len(df))
-
     # 7. Código CPV específico
     if filtro_cpv_codigo.strip():
         codigo_busqueda = filtro_cpv_codigo.strip()
@@ -694,37 +668,32 @@ def aplicar_filtros_comunes(df):
         if "cpv" in df.columns:
             df = df[df["cpv"].apply(coincide_codigo_cpv)]
 
-    st.write("DESPUÉS CÓDIGO CPV:", len(df))
-
     # 8. Fecha de cierre
-    # 8. Fechas de cierre
     def filtrar_fecha_fin(f_str):
         if pd.isna(f_str) or not str(f_str).strip():
             return True
-    
+
         f_str = str(f_str).strip()
-    
+
         # Si no hay fecha de cierre especificada, no excluir la licitación
         if f_str.lower() in ["no especificada", "no especificado"]:
             return True
-    
+
         try:
-            return date.fromisoformat(f_str[:10]) >= fecha_cierre_tope
+            return date.fromisoformat(
+                f_str[:10]
+            ) >= fecha_cierre_tope
         except (ValueError, TypeError):
             return True
-    
-    
+
     if "fecha_fin" in df.columns:
         df = df[
             df["fecha_fin"].apply(filtrar_fecha_fin)
         ]
 
-
-    st.write("DESPUÉS FECHA CIERRE:", len(df))
-
     # 9. Fecha de publicación
     def filtrar_fecha_pub(f_str):
-        if not f_str:
+        if pd.isna(f_str) or not str(f_str).strip():
             return False
 
         try:
@@ -734,7 +703,7 @@ def aplicar_filtros_comunes(df):
 
             return f_inicio <= fecha_pub <= f_fin
 
-        except ValueError:
+        except (ValueError, TypeError):
             return False
 
     if "fecha" in df.columns:
@@ -742,10 +711,7 @@ def aplicar_filtros_comunes(df):
             df["fecha"].apply(filtrar_fecha_pub)
         ]
 
-    st.write("DESPUÉS FECHA PUBLICACIÓN:", len(df))
-
     return df
-
 # 5. Lógica del Botón de Novedades
 if btn_novedades:
     with st.spinner("Buscando en novedades y actualizaciones..."):
