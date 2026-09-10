@@ -541,9 +541,13 @@ def aplicar_filtros_comunes(df):
         return df
 
     # 1. Filtro de fuente flexible para múltiples selecciones
+    #if filtro_fuente:
+     #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
+     #   df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
     if filtro_fuente:
-        patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
-        df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
+        # Se elimina el uso de \b para evitar conflictos con los espacios en blanco
+        patron_fuentes = "|".join([f for f in filtro_fuente])
+        df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=False)]
 
     # 2. Filtro de tipo de contrato flexible
     if filtro_tipo_contrato: 
