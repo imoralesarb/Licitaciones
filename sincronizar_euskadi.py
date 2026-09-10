@@ -296,57 +296,110 @@ def sincronizar_licitaciones_euskadi():
     # ========================================================
 
     if ids_flags_euskadi:
-
+    
         print(
             f"Reseteando flags anteriores de "
             f"{len(ids_flags_euskadi)} registros Euskadi..."
         )
-
+    
         tamano_reset = 25
-
+        max_intentos_reset = 3
+    
+        reset_correcto = True
+        total_reseteadas = 0
+    
         for i in range(
             0,
             len(ids_flags_euskadi),
             tamano_reset
         ):
-
+    
             lote_ids = ids_flags_euskadi[
                 i:i + tamano_reset
             ]
-
-            try:
-
-                (
-                    supabase
-                    .table("licitaciones")
-                    .update({
-                        "es_novedad": False,
-                        "es_actualizada": False
-                    })
-                    .in_(
-                        "id",
-                        lote_ids
+    
+            num_lote_reset = (
+                i // tamano_reset
+            ) + 1
+    
+            exito_lote = False
+    
+            for intento in range(
+                1,
+                max_intentos_reset + 1
+            ):
+    
+                try:
+    
+                    (
+                        supabase
+                        .table("licitaciones")
+                        .update({
+                            "es_novedad": False,
+                            "es_actualizada": False
+                        })
+                        .in_(
+                            "id",
+                            lote_ids
+                        )
+                        .execute()
                     )
-                    .execute()
-                )
-
-                print(
-                    f"  -> Flags reseteados: "
-                    f"{len(lote_ids)} registros."
-                )
-
-            except Exception as e:
-
-                print(
-                    f"Error reseteando lote de flags: {e}"
-                )
-
-        print(
-            "Flags anteriores reseteados correctamente."
-        )
-
+    
+                    total_reseteadas += len(lote_ids)
+    
+                    print(
+                        f"  -> Lote de flags "
+                        f"{num_lote_reset} reseteado con éxito "
+                        f"({len(lote_ids)} registros)."
+                    )
+    
+                    exito_lote = True
+                    break
+    
+                except Exception as e:
+    
+                    print(
+                        f"  -> Intento {intento}/"
+                        f"{max_intentos_reset} fallido "
+                        f"para lote de flags "
+                        f"{num_lote_reset}: {e}"
+                    )
+    
+                    if intento < max_intentos_reset:
+    
+                        time.sleep(
+                            2 * intento
+                        )
+    
+                    else:
+    
+                        print(
+                            f"  -> Error definitivo al resetear "
+                            f"el lote de flags "
+                            f"{num_lote_reset}."
+                        )
+    
+                        reset_correcto = False
+    
+            if not exito_lote:
+                continue
+    
+        if reset_correcto:
+    
+            print(
+                f"Flags anteriores reseteados correctamente: "
+                f"{total_reseteadas} registros."
+            )
+    
+        else:
+    
+            print(
+                "Aviso: no se pudieron resetear todos "
+                "los flags anteriores."
+            )
+    
     else:
-
+    
         print(
             "No hay flags anteriores de Euskadi "
             "que resetear."
