@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from datetime import datetime, date
 import os
 import requests
@@ -106,6 +105,36 @@ def contiene_fuente(fuente_actual, nombre_fuente):
     )
 
 
+def quitar_fuente(fuente, nombre_fuente):
+    """
+    Elimina únicamente una fuente concreta de una
+    lista de fuentes combinadas.
+
+    Ejemplo:
+        "TED, Licitaciones Generales PLACSP"
+
+    quitando:
+        "Licitaciones Generales PLACSP"
+
+    devuelve:
+        "TED"
+    """
+
+    fuentes = normalizar_fuentes(
+        fuente
+    )
+
+    fuentes_restantes = [
+        f
+        for f in fuentes
+        if f.casefold() != nombre_fuente.casefold()
+    ]
+
+    return ", ".join(
+        fuentes_restantes
+    )
+
+
 # ============================================================
 # 3. AUDITORÍA
 # ============================================================
@@ -122,6 +151,7 @@ def auditar_licitaciones_abiertas():
     }
 
     total_eliminadas = 0
+    total_fuentes_quitadas = 0
     total_actualizadas = 0
     total_sin_cambios = 0
     total_errores = 0
@@ -186,6 +216,8 @@ def auditar_licitaciones_abiertas():
                 f"❌ Error al consultar Supabase: {e}"
             )
 
+            total_errores += 1
+
             break
 
         # ====================================================
@@ -237,23 +269,37 @@ def auditar_licitaciones_abiertas():
             )
 
             # ------------------------------------------------
+            # Identificar qué fuente PLACSP tiene el registro
+            # ------------------------------------------------
+
+            fuente_placsp = None
+
+            if contiene_fuente(
+                fuente,
+                "Licitaciones Generales PLACSP"
+            ):
+
+                fuente_placsp = (
+                    "Licitaciones Generales PLACSP"
+                )
+
+            elif contiene_fuente(
+                fuente,
+                "Licitaciones Agregadas PLACSP"
+            ):
+
+                fuente_placsp = (
+                    "Licitaciones Agregadas PLACSP"
+                )
+
+            # ------------------------------------------------
             # Solo auditar registros pertenecientes a PLACSP
             # ------------------------------------------------
 
-            es_placsp = (
-                contiene_fuente(
-                    fuente,
-                    "Licitaciones Generales PLACSP"
-                )
-                or
-                contiene_fuente(
-                    fuente,
-                    "Licitaciones Agregadas PLACSP"
-                )
-            )
+            if fuente_placsp is None:
 
-            if not es_placsp:
                 total_sin_cambios += 1
+
                 continue
 
             # ------------------------------------------------
@@ -261,6 +307,7 @@ def auditar_licitaciones_abiertas():
             # ------------------------------------------------
 
             if not enlace:
+
                 continue
 
             # ------------------------------------------------
@@ -268,6 +315,7 @@ def auditar_licitaciones_abiertas():
             # ------------------------------------------------
 
             if "ted.europa.eu" in enlace:
+
                 continue
 
             try:
@@ -332,23 +380,75 @@ def auditar_licitaciones_abiertas():
                         .upper()
                     )
 
-                # ------------------------------------------------
-                # Si está cerrado, eliminar
-                # ------------------------------------------------
+                # =================================================
+                # Si está cerrado
+                # =================================================
 
                 if codigo_estado in ESTADOS_CERRADOS:
 
-                    ids_a_borrar.append(
-                        rec_id
+                    # ------------------------------------------------
+                    # Comprobar si existen otras fuentes
+                    # ------------------------------------------------
+
+                    nueva_fuente = quitar_fuente(
+                        fuente,
+                        fuente_placsp
                     )
 
-                    print(
-                        f"   🗑️ [A BORRAR - Estado "
-                        f"{codigo_estado}]: "
-                        f"{titulo[:50]}..."
-                    )
+                    # ------------------------------------------------
+                    # Si no quedan otras fuentes -> borrar registro
+                    # ------------------------------------------------
 
-                    total_eliminadas += 1
+                    if not nueva_fuente:
+
+                        ids_a_borrar.append(
+                            rec_id
+                        )
+
+                        print(
+                            f"   🗑️ [A BORRAR - Estado "
+                            f"{codigo_estado}]: "
+                            f"{titulo[:50]}..."
+                        )
+
+                        total_eliminadas += 1
+
+                    # ------------------------------------------------
+                    # Si quedan otras fuentes -> quitar solo PLACSP
+                    # ------------------------------------------------
+
+                    else:
+
+                        try:
+
+                            supabase.table(
+                                "licitaciones"
+                            ).update(
+                                {
+                                    "fuente": nueva_fuente
+                                }
+                            ).eq(
+                                "id",
+                                rec_id
+                            ).execute()
+
+                            print(
+                                f"   🔄 [FUENTE QUITADA - "
+                                f"Estado {codigo_estado}]: "
+                                f"{titulo[:50]}... "
+                                f"-> {nueva_fuente}"
+                            )
+
+                            total_fuentes_quitadas += 1
+
+                        except Exception as e:
+
+                            print(
+                                f"   ❌ Error quitando fuente "
+                                f"de {titulo[:50]}...: {e}"
+                            )
+
+                            total_errores += 1
 
                     continue
 
@@ -395,21 +495,74 @@ def auditar_licitaciones_abiertas():
 
                         if f_fin_date < hoy:
 
-                            ids_a_borrar.append(
-                                rec_id
+                            # ------------------------------------------------
+                            # Comprobar si existen otras fuentes
+                            # ------------------------------------------------
+
+                            nueva_fuente = quitar_fuente(
+                                fuente,
+                                fuente_placsp
                             )
 
-                            print(
-                                f"   🗑️ [A BORRAR - "
-                                f"Caducada]: "
-                                f"{titulo[:50]}..."
-                            )
+                            # ------------------------------------------------
+                            # Si no quedan otras fuentes -> borrar
+                            # ------------------------------------------------
 
-                            total_eliminadas += 1
+                            if not nueva_fuente:
+
+                                ids_a_borrar.append(
+                                    rec_id
+                                )
+
+                                print(
+                                    f"   🗑️ [A BORRAR - "
+                                    f"Caducada]: "
+                                    f"{titulo[:50]}..."
+                                )
+
+                                total_eliminadas += 1
+
+                            # ------------------------------------------------
+                            # Si quedan otras fuentes -> quitar PLACSP
+                            # ------------------------------------------------
+
+                            else:
+
+                                try:
+
+                                    supabase.table(
+                                        "licitaciones"
+                                    ).update(
+                                        {
+                                            "fuente": nueva_fuente
+                                        }
+                                    ).eq(
+                                        "id",
+                                        rec_id
+                                    ).execute()
+
+                                    print(
+                                        f"   🔄 [FUENTE QUITADA - "
+                                        f"Caducada]: "
+                                        f"{titulo[:50]}... "
+                                        f"-> {nueva_fuente}"
+                                    )
+
+                                    total_fuentes_quitadas += 1
+
+                                except Exception as e:
+
+                                    print(
+                                        f"   ❌ Error quitando fuente "
+                                        f"de {titulo[:50]}...: {e}"
+                                    )
+
+                                    total_errores += 1
 
                             continue
 
                     except ValueError:
+
                         pass
 
                 # =================================================
@@ -513,6 +666,8 @@ def auditar_licitaciones_abiertas():
                     f"lote en Supabase: {e}"
                 )
 
+                total_errores += 1
+
         lote_contador += 1
 
         time.sleep(
@@ -535,6 +690,11 @@ def auditar_licitaciones_abiertas():
         f"  - Eliminadas "
         f"(cerradas/caducadas): "
         f"{total_eliminadas}"
+    )
+
+    print(
+        f"  - Fuentes PLACSP quitadas: "
+        f"{total_fuentes_quitadas}"
     )
 
     print(
