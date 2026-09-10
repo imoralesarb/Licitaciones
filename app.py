@@ -544,43 +544,22 @@ def aplicar_filtros_comunes(df):
     #if filtro_fuente:
      #   patron_fuentes = "|".join([r"\b" + f + r"\b" for f in filtro_fuente])
      #   df = df[df["fuente"].str.contains(patron_fuentes, case=False, na=False, regex=True)]
-    # 1. Filtro de fuente
-    # 1. Filtro de fuente - DEBUG
     if filtro_fuente:
-        st.write("FILTRO SELECCIONADO:", [repr(f) for f in filtro_fuente])
+        st.write("FILTRO:", filtro_fuente)
     
-        fuentes_navarra = df[
-            df["fuente"]
-            .astype(str)
-            .str.contains("Navarra", case=False, na=False)
-        ]["fuente"].unique()
-    
-        st.write("FUENTES CON NAVARRA:", [repr(f) for f in fuentes_navarra])
-    
-        # Comparación carácter a carácter
-        if fuentes_navarra.size > 0:
-            seleccionada = filtro_fuente[0]
-            fuente_bd = fuentes_navarra[0]
-    
-            st.write("SELECCIONADA:", repr(seleccionada))
-            st.write("BD:", repr(fuente_bd))
-            st.write("¿SON IGUALES?:", seleccionada == fuente_bd)
-            st.write("LONGITUD SELECCIONADA:", len(seleccionada))
-            st.write("LONGITUD BD:", len(fuente_bd))
+        for fuente in filtro_fuente:
             st.write(
-                "CÓDIGOS SELECCIONADA:",
-                [ord(c) for c in seleccionada]
+                "FUENTE:",
+                repr(fuente),
+                "->",
+                df["fuente"].astype(str).str.contains(
+                    fuente,
+                    case=False,
+                    na=False,
+                    regex=False
+                ).sum(),
+                "coincidencias"
             )
-            st.write(
-                "CÓDIGOS BD:",
-                [ord(c) for c in fuente_bd]
-            )
-    
-        # Filtro
-        fuentes_seleccionadas = [
-            f.strip().casefold()
-            for f in filtro_fuente
-        ]
     
         df = df[
             df["fuente"]
@@ -588,8 +567,8 @@ def aplicar_filtros_comunes(df):
             .astype(str)
             .apply(
                 lambda x: any(
-                    fuente in x.casefold()
-                    for fuente in fuentes_seleccionadas
+                    fuente.strip().casefold() in x.casefold()
+                    for fuente in filtro_fuente
                 )
             )
         ]
