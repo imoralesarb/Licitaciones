@@ -633,6 +633,7 @@ def sincronizar_licitaciones_navarra():
                 or
                 reg_antiguo.get("importe")
                 != importe
+                or reg_antiguo.get("fecha_fin") != fecha_fin_str
             )
 
             if es_actualizado:
