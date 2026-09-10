@@ -126,7 +126,7 @@ def normalizar_organo(org):
 def sincronizar_licitaciones_euskadi():
 
     hoy_date = datetime.now().date()
-    ayer_date = hoy_date - timedelta(days=4)
+    ayer_date = hoy_date - timedelta(days=2)
 
     base_url = "https://api.euskadi.eus/administration/events"
 
