@@ -443,7 +443,7 @@ with col_rango:
     with col_hasta:
         f_fin = st.date_input(
             "📅 Rango publicación (Hasta)",
-            value=date(2100, 12, 31),
+            value=None,
             key="f_fin"
         )
         
