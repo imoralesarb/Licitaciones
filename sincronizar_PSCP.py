@@ -205,32 +205,28 @@ def sincronizar_licitaciones_pscp():
             .execute()
         )
 
-        registros_db = {}
+        registros_db_por_enlace = {}
+        registros_db_por_titulo_organo = {}
         ids_flags_pscp = []
 
         for item in existentes_resp.data:
-
             enlace_item = item.get("enlace")
+            titulo_item = str(item.get("titulo", "")).strip().casefold()
+            organo_item = str(item.get("organo", "")).strip().casefold()
 
             if enlace_item:
-                registros_db[enlace_item] = item
+                registros_db_por_enlace[enlace_item] = item
+            
+            if titulo_item and organo_item:
+                registros_db_por_titulo_organo[(titulo_item, organo_item)] = item
 
             # Buscar registros cuya fuente contenga PSCP
-            fuente_item = str(
-                item.get("fuente", "")
-            )
-
+            fuente_item = str(item.get("fuente", ""))
             if (
-                "pscp catalunya"
-                in fuente_item.casefold()
-                and (
-                    item.get("es_novedad") is True
-                    or item.get("es_actualizada") is True
-                )
+                "pscp catalunya" in fuente_item.casefold()
+                and (item.get("es_novedad") is True or item.get("es_actualizada") is True)
             ):
-                ids_flags_pscp.append(
-                    item["id"]
-                )
+                ids_flags_pscp.append(item["id"])
 
         print(
             f"Registros totales cargados desde Supabase: "
@@ -551,30 +547,71 @@ def sincronizar_licitaciones_pscp():
         )
 
         # ====================================================
-        # 5. REGISTRO EXISTENTE
+        # 5. REGISTRO EXISTENTE (POR ENLACE O TÍTULO + ÓRGANO)
         # ====================================================
+        
+        reg_antiguo = None
+        
+        # 1. Buscar primero por enlace exacto
+        if enlace in registros_db_por_enlace:
+            reg_antiguo = registros_db_por_enlace[enlace]
+        
+        # 2. Si no existe por enlace, buscar por título y órgano
+        else:
+            clave_to = (titulo_str.casefold(), organo_str.casefold())
+            if clave_to in registros_db_por_titulo_organo:
+                reg_antiguo = registros_db_por_titulo_organo[clave_to]
 
-        if enlace in registros_db:
-
-            reg_antiguo = registros_db[
-                enlace
-            ]
-
-            fuente_actual = str(
-                reg_antiguo.get(
-                    "fuente",
-                    ""
-                )
-            )
-
-            tipo_actual = str(
-                reg_antiguo.get(
-                    "tipo_contrato",
-                    ""
-                )
-            )
+        if reg_antiguo:
+            fuente_actual = str(reg_antiguo.get("fuente", ""))
+            tipo_actual = str(reg_antiguo.get("tipo_contrato", ""))
 
             actualizar_datos = {}
+
+            # Gestionar fuente
+            if "pscp catalunya" not in fuente_actual.casefold():
+                nueva_fuente = f"{fuente_actual}, PSCP Catalunya" if fuente_actual else "PSCP Catalunya"
+                actualizar_datos["fuente"] = nueva_fuente
+
+            # Completar tipo de contrato
+            if not tipo_actual or tipo_actual == "No especificado":
+                if tipo_contrato != "No especificado":
+                    actualizar_datos["tipo_contrato"] = tipo_contrato
+
+            # Comprobar cambios para sobreescribir y marcar actualización
+            es_actualizado = (
+                reg_antiguo.get("titulo") != titulo_str
+                or reg_antiguo.get("importe") != importe
+                or reg_antiguo.get("fecha_fin") != fecha_fin_str
+                or reg_antiguo.get("enlace") != enlace
+            )
+
+            if es_actualizado:
+                actualizar_datos["es_actualizada"] = True
+                # Sobrescribir los campos que han cambiado en la BDD
+                actualizar_datos["titulo"] = titulo_str
+                actualizar_data["organo"] = organo_str
+                actualizar_datos["importe"] = importe
+                actualizar_datos["fecha_fin"] = fecha_fin_str
+                actualizar_datos["enlace"] = enlace  # Asegura actualizar el enlace si hizo match por título/órgano
+                
+                # Opcional: regenerar y actualizar el embedding si cambió el texto clave
+                texto_completo = (
+                    f"passage: Título: {titulo_str}. Órgano: {organo_str}. "
+                    f"Tipo de contrato: {tipo_contrato}. CPV: {cpv}. "
+                    f"Lugar: {lugar_ejecucion}. Importe: {importe} EUR."
+                )
+                actualizar_datos["texto_completo"] = texto_completo
+                actualizar_datos["embedding"] = encoder.encode(texto_completo).tolist()
+
+            if actualizar_datos:
+                try:
+                    supabase.table("licitaciones").update(actualizar_datos).eq("id", reg_antiguo["id"]).execute()
+                    reg_antiguo.update(actualizar_datos)
+                except Exception as e:
+                    print(f"Error actualizando registro existente {enlace}: {e}")
+
+            continue
 
             # ------------------------------------------------
             # AÑADIR PSCP SI NO ESTÁ COMO FUENTE
