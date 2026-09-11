@@ -436,7 +436,7 @@ with col_rango:
     with col_desde:
         f_inicio = st.date_input(
             "📅 Rango publicación (Desde)",
-            value=date(2026, 1, 1),
+            value=None,
             key="f_inicio"
         )
 
