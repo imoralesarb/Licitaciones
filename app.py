@@ -459,7 +459,7 @@ with col_rango:
 #with col_r2:
 #    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
-# Sección de cantidad, pregunta y barra de resultados metidas dentro de un único recuadro unificado
+
 col_resultados, col_vacio = st.columns([50, 50])
 
 with col_resultados:
@@ -470,18 +470,38 @@ with col_resultados:
             unsafe_allow_html=True
         )
 
+        # Inicializar estados si no existen
+        if "mostrar_todos" not in st.session_state:
+            st.session_state.mostrar_todos = True
+        if "limite_resultados" not in st.session_state:
+            st.session_state.limite_resultados = 10
+
+        # Callback para cuando se mueve el slider
+        def actualizar_slider():
+            # Si se interactúa con el slider, desmarcamos el checkbox
+            st.session_state.mostrar_todos = False
+
+        # Callback para cuando se marca el checkbox
+        def actualizar_checkbox():
+            if st.session_state.mostrar_todos:
+                # Opcional: podrías resetear el slider si vuelve a marcar "Mostrar todos"
+                pass
+
         col_res_chk, col_res_texto, col_res_slider = st.columns([2.5, 2, 4])
 
         with col_res_chk:
             mostrar_todos = st.checkbox(
                 "Mostrar TODOS los resultados",
-                value=True,
-                key="mostrar_todos"
+                key="mostrar_todos",
+                on_change=actualizar_checkbox
             )
+
+        # Definimos el color gris si "mostrar_todos" está activo
+        color_texto = "gray" if mostrar_todos else "inherit"
 
         with col_res_texto:
             st.markdown(
-                '<div style="font-size: 15px; padding-top: 8px;">'
+                f'<div style="font-size: 15px; padding-top: 8px; color: {color_texto};">'
                 'Seleccionar número de resultados:'
                 '</div>',
                 unsafe_allow_html=True
@@ -492,9 +512,10 @@ with col_resultados:
                 "Resultados",
                 min_value=1,
                 max_value=500,
-                value=10,
                 key="limite_resultados",
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                disabled=mostrar_todos, # Esto desactiva y pone gris la barra nativamente
+                on_change=actualizar_slider
             )
 
 
