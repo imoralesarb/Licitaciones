@@ -460,7 +460,7 @@ with col_rango:
 #    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
 
-col_resultados, col_vacio = st.columns([50, 50])
+col_resultados, col_vacio = st.columns([60, 40])
 
 with col_resultados:
     with st.container(border=True):
