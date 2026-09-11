@@ -436,14 +436,14 @@ with col_rango:
     with col_desde:
         f_inicio = st.date_input(
             "📅 Rango publicación (Desde)",
-            value=None,
+            value=date(2026, 01, 1),
             key="f_inicio"
         )
 
     with col_hasta:
         f_fin = st.date_input(
             "📅 Rango publicación (Hasta)",
-            value=None,
+            value=date(2100, 12, 31),
             key="f_fin"
         )
         
