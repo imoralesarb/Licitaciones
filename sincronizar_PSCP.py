@@ -230,7 +230,7 @@ def sincronizar_licitaciones_pscp():
 
         print(
             f"Registros totales cargados desde Supabase: "
-            f"{len(registros_db)}"
+            f"{len(existentes_resp.data)}"
         )
 
     except Exception as e:
@@ -590,7 +590,7 @@ def sincronizar_licitaciones_pscp():
                 actualizar_datos["es_actualizada"] = True
                 # Sobrescribir los campos que han cambiado en la BDD
                 actualizar_datos["titulo"] = titulo_str
-                actualizar_data["organo"] = organo_str
+                actualizar_datos["organo"] = organo_str
                 actualizar_datos["importe"] = importe
                 actualizar_datos["fecha_fin"] = fecha_fin_str
                 actualizar_datos["enlace"] = enlace  # Asegura actualizar el enlace si hizo match por título/órgano
