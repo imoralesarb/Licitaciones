@@ -53,7 +53,17 @@ def limpiar_organo(organo):
 
 def extraer_texto_multilingue(valor, idioma_preferido="spa"):
     """
-    Extrae texto plano de estructuras multilingües o anidadas de la API de TED.
+    Varios campos de texto de la API de TED pueden llegar en formas muy
+    distintas según el aviso:
+      - un string simple: "Servicios de recogida de papel"
+      - un diccionario multilingüe: {"spa": "...", "eng": "..."}
+      - un diccionario multilingüe cuyos valores son LISTAS:
+            {"spa": ["Junta de Gobierno Local..."]}
+      - una lista de strings: ["Servicios de recogida de papel"]
+    Esta función los reduce todos a un único string plano, priorizando
+    `idioma_preferido` (español por defecto) y cayendo a cualquier otro
+    idioma disponible si no está. Devuelve None si no hay nada
+    aprovechable (nunca la representación en texto de un dict/lista).
     """
     if valor is None:
         return None
@@ -63,6 +73,7 @@ def extraer_texto_multilingue(valor, idioma_preferido="spa"):
             resultado = extraer_texto_multilingue(valor[idioma_preferido], idioma_preferido)
             if resultado:
                 return resultado
+        # Fallback: cualquier otro idioma disponible con contenido real.
         for contenido in valor.values():
             resultado = extraer_texto_multilingue(contenido, idioma_preferido)
             if resultado:
@@ -85,7 +96,20 @@ PATRON_FECHA_ISO = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 def extraer_fecha_iso(valor):
     """
-    Extraera "YYYY-MM-DD" robustamente de cualquier formato de fecha de TED.
+    Extrae "YYYY-MM-DD" de un valor de fecha de TED, que puede llegar
+    como:
+      - "2026-09-14"
+      - "2026-09-14+02:00"                  (zona horaria pegada, sin "T")
+      - "2026-09-14T00:00:00+01:00" / "...Z" (con "T" y zona horaria)
+      - ["2026-10-15T00:00:00+01:00"]        (envuelta en una lista)
+      - {"value": "2026-09-14"} u otro dict con la fecha en algún valor
+
+    Antes, cortar estos valores "a mano" (con `str(...)[:10]` sobre una
+    lista, por ejemplo) podía dejar fragmentos truncados e inválidos como
+    "['2026-10-...". Esta función busca el patrón YYYY-MM-DD donde sea
+    que esté dentro del valor (da igual lo que lo rodee) y comprueba que
+    sea una fecha real; si no encuentra nada válido, devuelve None en vez
+    de un fragmento roto.
     """
     if valor is None:
         return None
@@ -110,7 +134,7 @@ def extraer_fecha_iso(valor):
 
     fecha_str = coincidencia.group(1)
     try:
-        date.fromisoformat(fecha_str)
+        date.fromisoformat(fecha_str)  # valida que sea una fecha real, no solo el patrón
     except ValueError:
         return None
 
@@ -129,12 +153,18 @@ def normalizar_valor(valor):
 
 def obtener_importe(notice):
     """
-    Obtiene el importe total del aviso TED (devuelve 0.00 si no existe).
+    Obtiene el importe total del aviso TED. Si no viene especificado, o
+    llega en un formato que no se puede interpretar como número, se
+    devuelve 0.00 explícitamente -- nunca None/NaN -- para no guardar
+    valores nulos extraños en Supabase.
     """
     valor = notice.get("total-value")
     if valor is None:
         valor = notice.get("total-value-cur")
 
+    # Igual que otros campos de esta API, a veces el importe llega
+    # envuelto en una lista o en un diccionario en vez de un número/string
+    # suelto.
     if isinstance(valor, (list, tuple)):
         valor = valor[0] if valor else None
     if isinstance(valor, dict):
@@ -149,9 +179,21 @@ def obtener_importe(notice):
 
 def obtener_tipo_contrato(notice):
     """
-    Traduce el tipo de contrato de TED.
+    Traduce el tipo de contrato de TED ("supplies"/"services"/"works") a
+    "Suministros"/"Servicios"/"Obras".
+
+    El campo `contract-nature` de la API de TED llega envuelto en una
+    lista -- p. ej. ["services"], no "services" a secas -- así que
+    `str(notice.get("contract-nature", ""))` producía literalmente
+    "['services']", que nunca coincidía con ninguno de los tres valores
+    esperados y el campo se quedaba siempre vacío. Se reutiliza
+    `extraer_texto_multilingue` para desenvolver la lista (y cualquier
+    dict, por si en algún aviso viene así) antes de comparar, igual que
+    ya se hace con el resto de campos de este script.
     """
-    naturaleza = str(notice.get("contract-nature", "")).strip().lower()
+    naturaleza = extraer_texto_multilingue(notice.get("contract-nature"))
+    naturaleza = (naturaleza or "").strip().lower()
+
     if naturaleza == "supplies":
         return "Suministros"
     if naturaleza == "services":
@@ -163,6 +205,14 @@ def obtener_tipo_contrato(notice):
 def obtener_lugar(place):
     """
     Convierte información de NUTS de TED a un lugar legible.
+
+    Incluye código de provincia (NUTS3) para todo el territorio, no solo
+    para el País Vasco: así "ES617" se resuelve como "Málaga" en vez de
+    quedarse como el código en bruto. Además, algunos avisos listan
+    decenas de códigos NUTS separados por comas en un único string para
+    cubrir todo un territorio (p. ej. "ES111, ES112, ..., ESP"); en ese
+    caso se mapea cada código por separado, se eliminan duplicados y se
+    recorta el resultado para que siga siendo legible.
     """
     mapa_nuts = {
         "ES111": "A Coruña", "ES112": "Lugo", "ES113": "Ourense", "ES114": "Pontevedra",
@@ -218,6 +268,9 @@ def obtener_lugar(place):
     if not texto:
         return None
 
+    # Una cadena con varios códigos NUTS separados por comas: se separan,
+    # se mapea cada uno, se eliminan duplicados y se recorta si son
+    # demasiados para que el resultado siga siendo legible.
     codigos = [c.strip() for c in texto.split(",") if c.strip()]
     if len(codigos) > 1:
         nombres_unicos = list(dict.fromkeys(_mapear_codigo(c) for c in codigos))
@@ -245,18 +298,38 @@ def construir_texto_embedding(elemento):
     return " ".join(partes_limpias)
 
 def es_resultado_o_adjudicado(notice):
+    """
+    Determina si el aviso corresponde a un resultado/adjudicación.
+    """
     n_type = str(notice.get("notice-type", "")).strip().lower()
     f_type = str(notice.get("form-type", "")).strip().lower()
     return n_type.startswith("can-") or "award" in n_type or f_type == "result"
 
 def es_veat(notice):
+    """
+    Determina si el aviso corresponde a un VEAT.
+    """
     n_type = str(notice.get("notice-type", "")).strip().lower()
     return n_type.startswith("dir-awa-pre") or "dir-awa-pre" in n_type or "veat" in n_type
 
 # ============================================================
 # DESCARGAR TED
 # ============================================================
+# NOTA: esta es la única sección que cambia respecto al script original.
+# La API v3 de TED exige:
+#   - Fechas en formato compacto (YYYYMMDD, sin guiones).
+#   - Literales de fecha y de texto entre comillas simples dentro de
+#     "query" (publication-date >= 'YYYYMMDD', buyer-country = 'ESP').
+#   - Paginación por token ("iterationNextToken" en la respuesta, que hay
+#     que reenviar en la siguiente petición), no por un contador entero
+#     de "iteration".
+# El payload anterior (fechas con guion y sin comillas, "iteration" como
+# entero) es lo que provocaba el 400 Bad Request.
 def descargar_avisos_ted():
+    """
+    Descarga, paginando con 'iterationNextToken', todos los avisos de TED
+    para España publicados entre FECHA_DESDE y HOY.
+    """
     fecha_inicio = FECHA_DESDE.strftime("%Y%m%d")
     fecha_fin_str = HOY.strftime("%Y%m%d")
 
@@ -276,7 +349,7 @@ def descargar_avisos_ted():
         "total-value-cur",
         "notice-type",
         "form-type",
-        "contract-nature"  # <-- ASEGÚRATE DE INCLUIR ESTE CAMPO AQUÍ
+        "contract-nature"
     ]
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -341,7 +414,7 @@ registros_existentes = existentes_resp.data or []
 print(f"Registros totales cargados desde Supabase: {len(registros_existentes)}")
 
 # ============================================================
-# MAPAS Y RESTABLECIMIENTO DE BANDERAS
+# MAPAS DE REGISTROS EXISTENTES
 # ============================================================
 mapa_enlaces = {}
 mapa_claves = {}
@@ -354,6 +427,9 @@ for registro in registros_existentes:
     if titulo and organo:
         mapa_claves[(titulo, organo)] = registro
 
+# ============================================================
+# RESETEAR ETIQUETAS ANTERIORES DE TED
+# ============================================================
 ids_flags_ted = []
 for item in registros_existentes:
     fuente_item = str(item.get("fuente", ""))
@@ -364,16 +440,24 @@ print(f"Reseteando etiquetas anteriores de {len(ids_flags_ted)} registros de TED
 BATCH_RESET = 25
 for inicio in range(0, len(ids_flags_ted), BATCH_RESET):
     lote_ids = ids_flags_ted[inicio:inicio + BATCH_RESET]
+    actualizado = False
     for intento in range(1, 4):
         try:
             supabase.table("licitaciones").update({
                 "es_novedad": False,
                 "es_actualizada": False
             }).in_("id", lote_ids).execute()
+            actualizado = True
+            print(f"  -> Lote {inicio // BATCH_RESET + 1} actualizado correctamente.")
             break
-        except Exception:
+        except Exception as e:
+            print(f"  -> Intento {intento}/3 fallido para lote {inicio // BATCH_RESET + 1}: {e}")
             if intento < 3:
                 time.sleep(2 * intento)
+    if not actualizado:
+        print(f"  -> ERROR: no se pudo actualizar el lote {inicio // BATCH_RESET + 1}")
+
+print(f"Etiquetas anteriores reseteadas: {len(ids_flags_ted)} registros.")
 
 # ============================================================
 # PROCESAMIENTO
@@ -398,8 +482,15 @@ for notice in avisos_ted:
     publication_number = extraer_texto_multilingue(notice.get("publication-number")) or ""
     if not publication_number:
         continue
+    # Página de detalle del aviso en el portal actual de TED: requiere el
+    # segmento "-/detail/" (confirmado en la documentación oficial de
+    # ted.europa.eu); sin él, la URL devolvía "página no encontrada".
     enlace = f"https://ted.europa.eu/es/notice/-/detail/{publication_number}"
 
+    # El título y el órgano comprador pueden llegar como texto simple o
+    # como estructuras multilingües (dict por idioma, a veces con listas
+    # dentro) -- se reducen primero a texto plano y solo entonces se
+    # limpian.
     titulo_original = (
         extraer_texto_multilingue(notice.get("contract-title"))
         or extraer_texto_multilingue(notice.get("notice-title"))
@@ -410,19 +501,23 @@ for notice in avisos_ted:
     organo_bruto = extraer_texto_multilingue(notice.get("organisation-name-buyer"))
     organo = limpiar_organo(organo_bruto)
 
+    # Fecha de publicación: puede llegar con zona horaria pegada
+    # ("2026-09-14+02:00"); se conserva solo "YYYY-MM-DD".
     fecha_str = extraer_fecha_iso(notice.get("publication-date")) or ""
+
+    # Fecha de fin (deadline): puede llegar envuelta en una lista
+    # ("['2026-10-15T00:00:00+01:00']"), lo que antes producía fragmentos
+    # truncados tipo "['2026-10-..." al cortarla como string a pelo.
     fecha_fin_str = extraer_fecha_iso(notice.get("deadline-receipt-request"))
 
     importe = obtener_importe(notice)
     tipo_contrato = obtener_tipo_contrato(notice)
     lugar_ejecucion = obtener_lugar(notice.get("place-of-performance"))
-    
     cpv = notice.get("classification-cpv")
     if isinstance(cpv, list):
         cpv = ", ".join(str(x) for x in cpv)
     if cpv is not None:
         cpv = str(cpv).strip()
-
     texto_completo = notice.get("description-proc")
     if texto_completo is not None:
         texto_completo = str(texto_completo).strip()
@@ -454,14 +549,15 @@ for notice in avisos_ted:
             cambios["fecha_fin"] = fecha_fin_str
         if not reg_existente.get("tipo_contrato") and tipo_contrato:
             cambios["tipo_contrato"] = tipo_contrato
-            
         fuente_existente = str(reg_existente.get("fuente", "")).strip()
         fuentes = [f.strip() for f in fuente_existente.split(",") if f.strip()]
-        if not any(f.casefold() == "ted" for f in fuentes):
+        tiene_ted = any(f.casefold() == "ted" for f in fuentes)
+        if not tiene_ted:
             fuentes.append("TED")
             cambios["fuente"] = ", ".join(dict.fromkeys(fuentes))
 
-        if "titulo" in cambios or "importe" in cambios or "fecha_fin" in cambios or "tipo_contrato" in cambios:
+        cambios_relevantes = "titulo" in cambios or "importe" in cambios or "fecha_fin" in cambios
+        if cambios_relevantes:
             cambios["es_actualizada"] = True
             try:
                 supabase.table("licitaciones").update(cambios).eq("id", reg_existente["id"]).execute()
@@ -471,10 +567,27 @@ for notice in avisos_ted:
         elif cambios:
             try:
                 supabase.table("licitaciones").update(cambios).eq("id", reg_existente["id"]).execute()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error actualizando metadatos {reg_existente['id']}: {e}")
         else:
             sin_cambios += 1
+        continue
+
+    clave = (titulo_limpio.casefold(), limpiar_organo(organo).casefold())
+    registro_mismo_titulo = mapa_claves.get(clave)
+    if registro_mismo_titulo is not None:
+        fuente_existente = str(registro_mismo_titulo.get("fuente", "")).strip()
+        fuentes = [f.strip() for f in fuente_existente.split(",") if f.strip()]
+        tiene_ted = any(f.casefold() == "ted" for f in fuentes)
+        if not tiene_ted:
+            fuentes.append("TED")
+            try:
+                supabase.table("licitaciones").update({
+                    "fuente": ", ".join(dict.fromkeys(fuentes))
+                }).eq("id", registro_mismo_titulo["id"]).execute()
+            except Exception as e:
+                print(f"Error añadiendo TED como fuente: {e}")
+        duplicados += 1
         continue
 
     elemento = {
@@ -492,19 +605,33 @@ for notice in avisos_ted:
         "es_novedad": True,
         "es_actualizada": False
     }
-    
     texto_embedding = construir_texto_embedding(elemento)
     try:
         embedding = modelo.encode(texto_embedding).tolist()
         elemento["embedding"] = embedding
-    except Exception:
+    except Exception as e:
+        print(f"Error generando embedding para {publication_number}: {e}")
         elemento["embedding"] = None
-        
     licitaciones_nuevas.append(elemento)
     nuevas += 1
 
 # ============================================================
-# INSERCIÓN Y LIMPIEZA
+# ESTADÍSTICAS
+# ============================================================
+print()
+print("=" * 60)
+print("ESTADÍSTICAS TED")
+print("=" * 60)
+print(f"Duplicados evitados (ya estaban en PLACSP): {duplicados}")
+print(f"Adjudicados/resultados filtrados: {resultados_filtrados}")
+print(f"VEAT: {veat}")
+print(f"Caducados: {caducados}")
+print(f"Nuevas: {nuevas}")
+print(f"Actualizadas: {actualizadas}")
+print(f"Sin cambios: {sin_cambios}")
+
+# ============================================================
+# INSERTAR SOLO LAS NUEVAS
 # ============================================================
 if licitaciones_nuevas:
     print(f"Insertando {len(licitaciones_nuevas)} licitaciones nuevas...")
@@ -513,7 +640,65 @@ if licitaciones_nuevas:
         lote = licitaciones_nuevas[inicio:inicio + BATCH_INSERT]
         try:
             supabase.table("licitaciones").insert(lote).execute()
+            print(f"  -> Insertadas {min(inicio + BATCH_INSERT, len(licitaciones_nuevas))}/{len(licitaciones_nuevas)}")
         except Exception as e:
-            print(f"Error insertando lote: {e}")
+            print(f"Error insertando lote {inicio // BATCH_INSERT + 1}: {e}")
+else:
+    print("No hay licitaciones nuevas para insertar.")
 
-print("Sincronización TED finalizada.")
+# ============================================================
+# LIMPIEZA DE TED CADUCADAS EN BBDD
+# ============================================================
+print()
+print("Comprobando licitaciones TED caducadas en BBDD...")
+try:
+    ted_resp = supabase.table("licitaciones").select(
+        "id,enlace,fuente,fecha_fin"
+    ).ilike("fuente", "%TED%").execute()
+    ted_bbdd = ted_resp.data or []
+    eliminadas = 0
+    fuentes_modificadas = 0
+
+    for registro in ted_bbdd:
+        fecha_fin = registro.get("fecha_fin")
+        if not fecha_fin:
+            continue
+        try:
+            fecha_fin_date = date.fromisoformat(str(fecha_fin)[:10])
+        except ValueError:
+            continue
+        if fecha_fin_date >= HOY:
+            continue
+
+        fuente = str(registro.get("fuente", "")).strip()
+        fuentes = [f.strip() for f in fuente.split(",") if f.strip()]
+        fuentes_sin_ted = [f for f in fuentes if f.casefold() != "ted"]
+
+        if not fuentes_sin_ted:
+            try:
+                supabase.table("licitaciones").delete().eq("id", registro["id"]).execute()
+                eliminadas += 1
+            except Exception as e:
+                print(f"Error eliminando {registro['id']}: {e}")
+        else:
+            nueva_fuente = ", ".join(fuentes_sin_ted)
+            try:
+                supabase.table("licitaciones").update({
+                    "fuente": nueva_fuente
+                }).eq("id", registro["id"]).execute()
+                fuentes_modificadas += 1
+            except Exception as e:
+                print(f"Error modificando fuente {registro['id']}: {e}")
+
+    if eliminadas == 0 and fuentes_modificadas == 0:
+        print("No hay licitaciones TED caducadas para eliminar.")
+    else:
+        print(f"Eliminadas por caducidad: {eliminadas}")
+        print(f"Registros donde se eliminó TED de la fuente: {fuentes_modificadas}")
+except Exception as e:
+    print(f"Error comprobando caducadas en BBDD: {e}")
+
+print()
+print("=" * 60)
+print("SINCRONIZACIÓN TED FINALIZADA")
+print("=" * 60)
