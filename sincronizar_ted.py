@@ -51,6 +51,96 @@ def limpiar_organo(organo):
         return ""
     return re.sub(r"\s+", " ", str(organo).strip())
 
+def extraer_texto_multilingue(valor, idioma_preferido="spa"):
+    """
+    Varios campos de texto de la API de TED pueden llegar en formas muy
+    distintas según el aviso:
+      - un string simple: "Servicios de recogida de papel"
+      - un diccionario multilingüe: {"spa": "...", "eng": "..."}
+      - un diccionario multilingüe cuyos valores son LISTAS:
+            {"spa": ["Junta de Gobierno Local..."]}
+      - una lista de strings: ["Servicios de recogida de papel"]
+    Esta función los reduce todos a un único string plano, priorizando
+    `idioma_preferido` (español por defecto) y cayendo a cualquier otro
+    idioma disponible si no está. Devuelve None si no hay nada
+    aprovechable (nunca la representación en texto de un dict/lista).
+    """
+    if valor is None:
+        return None
+
+    if isinstance(valor, dict):
+        if idioma_preferido in valor and valor[idioma_preferido]:
+            resultado = extraer_texto_multilingue(valor[idioma_preferido], idioma_preferido)
+            if resultado:
+                return resultado
+        # Fallback: cualquier otro idioma disponible con contenido real.
+        for contenido in valor.values():
+            resultado = extraer_texto_multilingue(contenido, idioma_preferido)
+            if resultado:
+                return resultado
+        return None
+
+    if isinstance(valor, (list, tuple)):
+        for elemento in valor:
+            resultado = extraer_texto_multilingue(elemento, idioma_preferido)
+            if resultado:
+                return resultado
+        return None
+
+    texto = str(valor).strip()
+    return texto if texto else None
+
+
+PATRON_FECHA_ISO = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def extraer_fecha_iso(valor):
+    """
+    Extrae "YYYY-MM-DD" de un valor de fecha de TED, que puede llegar
+    como:
+      - "2026-09-14"
+      - "2026-09-14+02:00"                  (zona horaria pegada, sin "T")
+      - "2026-09-14T00:00:00+01:00" / "...Z" (con "T" y zona horaria)
+      - ["2026-10-15T00:00:00+01:00"]        (envuelta en una lista)
+      - {"value": "2026-09-14"} u otro dict con la fecha en algún valor
+
+    Antes, cortar estos valores "a mano" (con `str(...)[:10]` sobre una
+    lista, por ejemplo) podía dejar fragmentos truncados e inválidos como
+    "['2026-10-...". Esta función busca el patrón YYYY-MM-DD donde sea
+    que esté dentro del valor (da igual lo que lo rodee) y comprueba que
+    sea una fecha real; si no encuentra nada válido, devuelve None en vez
+    de un fragmento roto.
+    """
+    if valor is None:
+        return None
+
+    if isinstance(valor, (list, tuple)):
+        for elemento in valor:
+            resultado = extraer_fecha_iso(elemento)
+            if resultado:
+                return resultado
+        return None
+
+    if isinstance(valor, dict):
+        for contenido in valor.values():
+            resultado = extraer_fecha_iso(contenido)
+            if resultado:
+                return resultado
+        return None
+
+    coincidencia = PATRON_FECHA_ISO.search(str(valor))
+    if not coincidencia:
+        return None
+
+    fecha_str = coincidencia.group(1)
+    try:
+        date.fromisoformat(fecha_str)  # valida que sea una fecha real, no solo el patrón
+    except ValueError:
+        return None
+
+    return fecha_str
+
+
 def normalizar_valor(valor):
     """
     Normaliza valores para poder comparar correctamente.
@@ -63,17 +153,29 @@ def normalizar_valor(valor):
 
 def obtener_importe(notice):
     """
-    Obtiene el importe total del aviso TED.
+    Obtiene el importe total del aviso TED. Si no viene especificado, o
+    llega en un formato que no se puede interpretar como número, se
+    devuelve 0.00 explícitamente -- nunca None/NaN -- para no guardar
+    valores nulos extraños en Supabase.
     """
     valor = notice.get("total-value")
     if valor is None:
         valor = notice.get("total-value-cur")
+
+    # Igual que otros campos de esta API, a veces el importe llega
+    # envuelto en una lista o en un diccionario en vez de un número/string
+    # suelto.
+    if isinstance(valor, (list, tuple)):
+        valor = valor[0] if valor else None
+    if isinstance(valor, dict):
+        valor = valor.get("value") or valor.get("amount") or next(iter(valor.values()), None)
+
     if valor is None:
-        return None
+        return 0.00
     try:
         return float(valor)
     except (ValueError, TypeError):
-        return None
+        return 0.00
 
 def obtener_tipo_contrato(notice):
     """
@@ -91,41 +193,56 @@ def obtener_tipo_contrato(notice):
 def obtener_lugar(place):
     """
     Convierte información de NUTS de TED a un lugar legible.
+
+    Incluye código de provincia (NUTS3) para todo el territorio, no solo
+    para el País Vasco: así "ES617" se resuelve como "Málaga" en vez de
+    quedarse como el código en bruto. Además, algunos avisos listan
+    decenas de códigos NUTS separados por comas en un único string para
+    cubrir todo un territorio (p. ej. "ES111, ES112, ..., ESP"); en ese
+    caso se mapea cada código por separado, se eliminan duplicados y se
+    recorta el resultado para que siga siendo legible.
     """
     mapa_nuts = {
-        "ES": "España",
-        "ES11": "Galicia",
-        "ES12": "Principado de Asturias",
-        "ES13": "Cantabria",
-        "ES21": "País Vasco",
-        "ES22": "Navarra",
-        "ES23": "La Rioja",
-        "ES24": "Aragón",
-        "ES30": "Comunidad de Madrid",
-        "ES41": "Castilla y León",
-        "ES42": "Castilla-La Mancha",
-        "ES43": "Extremadura",
-        "ES51": "Cataluña",
-        "ES52": "Comunidad Valenciana",
-        "ES53": "Illes Balears",
-        "ES61": "Andalucía",
-        "ES62": "Región de Murcia",
-        "ES63": "Ciudad Autónoma de Ceuta",
-        "ES64": "Ciudad Autónoma de Melilla",
-        "ES70": "Canarias",
-        "ES211": "Álava/Araba",
-        "ES212": "Gipuzkoa",
-        "ES213": "Bizkaia",
+        "ES111": "A Coruña", "ES112": "Lugo", "ES113": "Ourense", "ES114": "Pontevedra",
+        "ES120": "Asturias", "ES130": "Cantabria",
+        "ES211": "Álava/Araba", "ES212": "Gipuzkoa", "ES213": "Bizkaia",
+        "ES220": "La Rioja", "ES230": "Navarra",
+        "ES241": "Huesca", "ES242": "Teruel", "ES243": "Zaragoza",
+        "ES300": "Madrid",
+        "ES411": "Ávila", "ES412": "Burgos", "ES413": "León", "ES414": "Palencia",
+        "ES415": "Salamanca", "ES416": "Segovia", "ES417": "Soria", "ES418": "Valladolid", "ES419": "Zamora",
+        "ES421": "Albacete", "ES422": "Ciudad Real", "ES423": "Cuenca", "ES424": "Guadalajara", "ES425": "Toledo",
+        "ES431": "Badajoz", "ES432": "Cáceres",
+        "ES511": "Barcelona", "ES512": "Girona", "ES513": "Lleida", "ES514": "Tarragona",
+        "ES521": "Alicante/Alacant", "ES522": "Castellón/Castelló", "ES523": "Valencia/València",
+        "ES531": "Eivissa y Formentera", "ES532": "Mallorca", "ES533": "Menorca",
+        "ES611": "Almería", "ES612": "Cádiz", "ES613": "Córdoba", "ES614": "Granada",
+        "ES615": "Huelva", "ES616": "Jaén", "ES617": "Málaga", "ES618": "Sevilla",
+        "ES620": "Murcia",
+        "ES630": "Ceuta",
+        "ES640": "Melilla",
+        "ES703": "El Hierro", "ES704": "Fuerteventura", "ES705": "Gran Canaria",
+        "ES706": "La Gomera", "ES707": "La Palma", "ES708": "Lanzarote", "ES709": "Tenerife",
+        "ES1": "Noroeste (España)", "ES2": "Noreste (España)", "ES3": "Comunidad de Madrid (España)",
+        "ES4": "Centro (España)", "ES5": "Este (España)", "ES6": "Sur (España)", "ES7": "Canarias (España)",
+        "ES": "España", "ESP": "España",
     }
+
+    def _mapear_codigo(codigo):
+        codigo = str(codigo).strip()
+        return mapa_nuts.get(codigo.upper(), codigo)
+
     if not place:
         return None
+
     if isinstance(place, dict):
         for clave in ["nuts", "nuts-code", "nutsCode", "code"]:
             valor = place.get(clave)
             if valor:
                 if isinstance(valor, list):
                     valor = valor[0]
-                return mapa_nuts.get(str(valor).upper(), str(valor))
+                return _mapear_codigo(valor)
+
     if isinstance(place, list):
         lugares = []
         for elemento in place:
@@ -134,10 +251,24 @@ def obtener_lugar(place):
                 lugares.append(lugar)
         if lugares:
             return ", ".join(dict.fromkeys(lugares))
+
     texto = str(place).strip()
-    if texto:
-        return mapa_nuts.get(texto.upper(), texto)
-    return None
+    if not texto:
+        return None
+
+    # Una cadena con varios códigos NUTS separados por comas: se separan,
+    # se mapea cada uno, se eliminan duplicados y se recorta si son
+    # demasiados para que el resultado siga siendo legible.
+    codigos = [c.strip() for c in texto.split(",") if c.strip()]
+    if len(codigos) > 1:
+        nombres_unicos = list(dict.fromkeys(_mapear_codigo(c) for c in codigos))
+        MAX_LUGARES_MOSTRADOS = 3
+        if len(nombres_unicos) > MAX_LUGARES_MOSTRADOS:
+            resto = len(nombres_unicos) - MAX_LUGARES_MOSTRADOS
+            return ", ".join(nombres_unicos[:MAX_LUGARES_MOSTRADOS]) + f" y {resto} más"
+        return ", ".join(nombres_unicos)
+
+    return _mapear_codigo(texto)
 
 def construir_texto_embedding(elemento):
     """
@@ -336,22 +467,36 @@ for notice in avisos_ted:
         veat += 1
         continue
 
-    publication_number = str(notice.get("publication-number", "")).strip()
+    publication_number = extraer_texto_multilingue(notice.get("publication-number")) or ""
     if not publication_number:
         continue
-    enlace = "https://ted.europa.eu/es/notice/" + publication_number
-    titulo_original = notice.get("contract-title") or notice.get("notice-title") or ""
+    # Página de detalle del aviso en el portal actual de TED: requiere el
+    # segmento "-/detail/" (confirmado en la documentación oficial de
+    # ted.europa.eu); sin él, la URL devolvía "página no encontrada".
+    enlace = f"https://ted.europa.eu/es/notice/-/detail/{publication_number}"
+
+    # El título y el órgano comprador pueden llegar como texto simple o
+    # como estructuras multilingües (dict por idioma, a veces con listas
+    # dentro) -- se reducen primero a texto plano y solo entonces se
+    # limpian.
+    titulo_original = (
+        extraer_texto_multilingue(notice.get("contract-title"))
+        or extraer_texto_multilingue(notice.get("notice-title"))
+        or ""
+    )
     titulo_limpio = limpiar_titulo(titulo_original)
-    organo = limpiar_organo(notice.get("organisation-name-buyer", ""))
-    fecha_str = str(notice.get("publication-date", "")).strip()
-    fecha_fin_raw = notice.get("deadline-receipt-request")
-    fecha_fin_str = None
-    if fecha_fin_raw:
-        fecha_fin_str = str(fecha_fin_raw).strip()
-        if "T" in fecha_fin_str:
-            fecha_fin_str = fecha_fin_str.split("T")[0]
-        if len(fecha_fin_str) >= 10:
-            fecha_fin_str = fecha_fin_str[:10]
+
+    organo_bruto = extraer_texto_multilingue(notice.get("organisation-name-buyer"))
+    organo = limpiar_organo(organo_bruto)
+
+    # Fecha de publicación: puede llegar con zona horaria pegada
+    # ("2026-09-14+02:00"); se conserva solo "YYYY-MM-DD".
+    fecha_str = extraer_fecha_iso(notice.get("publication-date")) or ""
+
+    # Fecha de fin (deadline): puede llegar envuelta en una lista
+    # ("['2026-10-15T00:00:00+01:00']"), lo que antes producía fragmentos
+    # truncados tipo "['2026-10-..." al cortarla como string a pelo.
+    fecha_fin_str = extraer_fecha_iso(notice.get("deadline-receipt-request"))
 
     importe = obtener_importe(notice)
     tipo_contrato = obtener_tipo_contrato(notice)
