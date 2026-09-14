@@ -172,9 +172,12 @@ def es_veat(notice):
 # ============================================================
 # DESCARGAR TED
 # ============================================================
-print(f"Consultando la API de TED para España ({FECHA_DESDE.strftime('%Y%m%d')} a {HOY.strftime('%Y%m%d')})...")
+fecha_inicio_str = FECHA_DESDE.strftime('%Y%m%d')
+fecha_fin_str = HOY.strftime('%Y%m%d')
+
+print(f"Consultando la API de TED para España ({fecha_inicio_str} a {fecha_fin_str})...")
 payload = {
-    "query": f"publication-date >= {FECHA_DESDE.strftime('%Y-%m-%d')} AND publication-date <= {HOY.strftime('%Y-%m-%d')} AND buyer-country = ESP",
+    "query": f"publication-date >= '{fecha_inicio_str}' AND publication-date <= '{fecha_fin_str}' AND buyer-country = 'ESP'",
     "fields": [
         "publication-number",
         "contract-title",
@@ -195,10 +198,11 @@ payload = {
     "limit": 250
 }
 avisos_ted = []
-iteration = 1
+iteration_next_token = None
 
 while True:
-    payload["iteration"] = iteration
+    if iteration_next_token:
+        payload["iterationNextToken"] = iteration_next_token
     try:
         respuesta = requests.post(TED_URL, json=payload, timeout=120)
         respuesta.raise_for_status()
@@ -211,9 +215,10 @@ while True:
         break
     avisos_ted.extend(resultados)
     print(f"  Lote TED descargado: {len(resultados)} registros (total {len(avisos_ted)})")
-    if len(resultados) < 250:
+    
+    iteration_next_token = datos.get("iterationNextToken")
+    if not iteration_next_token or len(resultados) < 250:
         break
-    iteration += 1
 
 print(f"Total avisos TED descargados: {len(avisos_ted)}")
 
