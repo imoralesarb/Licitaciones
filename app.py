@@ -354,7 +354,7 @@ consulta_texto = st.text_input(
 
 filtro_palabras_clave = st.text_input(
     "Palabras clave",
-    placeholder="ej. deporte, mantenimiento, obras...",
+    placeholder="ej. mantenimiento, obras...",
     key="filtro_palabras_clave",
     disabled=hay_consulta_texto_activa,
 )
