@@ -1,10 +1,11 @@
-from datetime import date, timedelta
+from datetime import date
 import os
 import re
 import pandas as pd
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from supabase import Client, create_client
+from datetime import date, timedelta
 
 # Desactivar traductor automático del navegador
 st.markdown(
@@ -334,7 +335,9 @@ def limpiar_campos():
     st.session_state.mensaje_estado = ""
 
 
-# Buscador principal y Palabras clave (mutuamente excluyentes)
+# Buscador principal y Palabras clave (mutuamente excluyentes: el uso de
+# uno desactiva y sombrea en gris el otro, mismo comportamiento que el
+# selector de "¿Cuántos resultados quieres ver?").
 hay_palabras_clave_activas = bool(
     st.session_state.get("filtro_palabras_clave", "").strip()
 )
@@ -351,12 +354,15 @@ consulta_texto = st.text_input(
 
 filtro_palabras_clave = st.text_input(
     "Palabras clave",
-    placeholder="ej. mantenimiento, \"soporte técnico\", obras...",
+    placeholder="ej. mantenimiento, obras...",
     key="filtro_palabras_clave",
     disabled=hay_consulta_texto_activa,
 )
 st.caption(
-    "💡 **Consejo de búsqueda:** Puedes introducir palabras sueltas o frases completas **entre comillas dobles** (ej. `\"soporte técnico\"`) para buscar términos exactos y seguidos en el título."
+    "Escribe varias palabras para buscar cualquiera de ellas. Usa comillas "
+    'para exigir una frase exacta (ej. "mantenimiento de equipos") y un '
+    "guion delante de una palabra o frase para excluirla (ej. -limpieza o "
+    '-"limpieza de cristales").'
 )
 
 # Panel de filtros avanzados
@@ -436,6 +442,7 @@ with col_cpv:
         key="filtro_cpv_codigo"
     )
 
+# Fila inferior con fecha fin y rango de publicación alineados en el mismo renglón
 # Fila de fechas
 col_fecha_fin, col_rango = st.columns([1, 2])
 
@@ -447,6 +454,8 @@ with col_fecha_fin:
     )
 
 with col_rango:
+    # st.markdown("📅 Rango publicación:")
+
     col_desde, col_hasta = st.columns(2)
 
     with col_desde:
@@ -462,6 +471,18 @@ with col_rango:
             value=date(2100, 12, 31),
             key="f_fin"
         )
+        
+# col_f_lbl, col_r_lbl, col_r1, col_r2 = st.columns([1.5, 1.2, 2, 2])
+# with col_f_lbl:
+#    fecha_cierre_tope = st.date_input(
+#        "⏳ Fecha fin de presentación (Mínima)", value=date(2026, 3, 1), key="fecha_cierre_tope"
+#    )
+#with col_r_lbl:
+#    st.markdown('<div class="alignment-fix">📅 Rango publicación:</div>', unsafe_allow_html=True)
+#with col_r1:
+#    f_inicio = st.date_input("Desde", value=date(2026, 1, 1), key="f_inicio", label_visibility="collapsed")
+#with col_r2:
+#    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
 
 col_resultados, col_vacio = st.columns([60, 40])
@@ -474,16 +495,21 @@ with col_resultados:
             unsafe_allow_html=True
         )
 
+        # Inicializar estados si no existen
         if "mostrar_todos" not in st.session_state:
             st.session_state.mostrar_todos = True
         if "limite_resultados" not in st.session_state:
             st.session_state.limite_resultados = 10
 
+        # Callback para cuando se mueve el slider
         def actualizar_slider():
+            # Si se interactúa con el slider, desmarcamos el checkbox
             st.session_state.mostrar_todos = False
 
+        # Callback para cuando se marca el checkbox
         def actualizar_checkbox():
             if st.session_state.mostrar_todos:
+                # Opcional: podrías resetear el slider si vuelve a marcar "Mostrar todos"
                 pass
 
         col_res_chk, col_res_texto, col_res_slider = st.columns([2.5, 2, 4])
@@ -495,6 +521,7 @@ with col_resultados:
                 on_change=actualizar_checkbox
             )
 
+        # Definimos el color gris si "mostrar_todos" está activo
         color_texto = "gray" if mostrar_todos else "inherit"
 
         with col_res_texto:
@@ -512,9 +539,10 @@ with col_resultados:
                 max_value=500,
                 key="limite_resultados",
                 label_visibility="collapsed",
-                disabled=mostrar_todos, 
+                disabled=mostrar_todos, # Esto desactiva y pone gris la barra nativamente
                 on_change=actualizar_slider
             )
+
 
 
 # --- BOTONES DE ACCIÓN PRINCIPAL ---
@@ -554,21 +582,24 @@ def estilizar_filas(row):
     return [""] * len(row)
 
 
-# --- FUNCIONES DE SOPORTE PARA PALABRAS CLAVE CON COMILLAS Y REGEX ---
-def _analizar_palabras_clave(texto_filtro):
-    """Extrae frases exactas entre comillas dobles y palabras sueltas."""
-    if not texto_filtro:
-        return [], []
-
-    frases_exactas = re.findall(r'"([^"]+)"', texto_filtro)
-    resto_texto = re.sub(r'"[^"]+"', '', texto_filtro)
-    palabras_sueltas = re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", resto_texto)
-    
-    return frases_exactas, palabras_sueltas
+# Función genérica para aplicar todos los filtros de Pandas en común
+def _tokenizar_palabras(texto):
+    """Extrae palabras (secuencias de letras) de un texto, ignorando comas,
+    signos de puntuacion y espacios, que es lo que separa las palabras
+    clave introducidas por el usuario."""
+    if not texto:
+        return []
+    return re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", texto)
 
 
 def _formas_singular_plural(palabra):
-    """Genera variantes de singular y plural de forma heurística."""
+    """Devuelve un conjunto con la palabra y sus variantes de singular o
+    plural mas probables en español, aplicando solo las reglas
+    habituales de formacion del plural (anadir "s", anadir "es", o
+    "z" -> "ces"). Es una heuristica basada en reglas, no un
+    lematizador: a proposito NO cubre otras variaciones como
+    "deportivo" o "deportiva", solo el plural regular de la propia
+    palabra, tal como se pidio."""
     p = palabra.lower().strip()
     formas = {p}
 
@@ -591,30 +622,105 @@ def _formas_singular_plural(palabra):
     return formas
 
 
-def _titulo_cumple_palabras_clave(titulo, frases_exactas, palabras_sueltas):
-    """Comprueba si el título contiene frases exactas y palabras sueltas."""
+def _analizar_consulta_palabras_clave(texto):
+    """Analiza el texto del campo "Palabras clave" y separa lo que hay
+    que exigir/excluir del titulo, segun esta sintaxis:
+        "frase exacta"   -> debe aparecer, en ese orden, en el titulo
+        -"frase excluida" -> esa frase NO debe aparecer en el titulo
+        palabra           -> debe aparecer esa palabra (o su plural);
+                              si hay varias palabras sueltas, basta con
+                              que aparezca CUALQUIERA de ellas
+        -palabra           -> esa palabra (ni su plural) NO debe aparecer
+    Devuelve un diccionario con las 4 listas ya separadas."""
+    frases_incluir = []
+    frases_excluir = []
+
+    def _registrar_frase(coincidencia):
+        negada = coincidencia.group(1) == "-"
+        palabras_frase = _tokenizar_palabras(coincidencia.group(2))
+        if palabras_frase:
+            if negada:
+                frases_excluir.append(palabras_frase)
+            else:
+                frases_incluir.append(palabras_frase)
+        return " "
+
+    texto_sin_frases = re.sub(r'(-?)"([^"]*)"', _registrar_frase, texto)
+
+    palabras_incluir = []
+    palabras_excluir = []
+    for signo, palabra in re.findall(
+        r"(-?)([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+)", texto_sin_frases
+    ):
+        if signo == "-":
+            palabras_excluir.append(palabra)
+        else:
+            palabras_incluir.append(palabra)
+
+    return {
+        "frases_incluir": frases_incluir,
+        "frases_excluir": frases_excluir,
+        "palabras_incluir": palabras_incluir,
+        "palabras_excluir": palabras_excluir,
+    }
+
+
+def _contiene_frase(formas_titulo_por_posicion, palabras_frase):
+    """True si palabras_frase aparece, en ese orden y de forma contigua,
+    dentro del titulo (cada palabra de la frase admite su plural, igual
+    que las palabras clave sueltas)."""
+    if not palabras_frase:
+        return False
+
+    formas_frase = [_formas_singular_plural(p) for p in palabras_frase]
+    total_frase = len(formas_frase)
+    total_titulo = len(formas_titulo_por_posicion)
+
+    for inicio in range(total_titulo - total_frase + 1):
+        if all(
+            formas_frase[i] & formas_titulo_por_posicion[inicio + i]
+            for i in range(total_frase)
+        ):
+            return True
+
+    return False
+
+
+def _titulo_cumple_consulta_palabras_clave(titulo, consulta):
+    """Evalua un titulo contra el resultado de
+    _analizar_consulta_palabras_clave: deben cumplirse TODAS las frases
+    y palabras exigidas, NINGUNA de las frases o palabras excluidas, y
+    -si hay palabras sueltas sin comillas- al menos una de ellas."""
     if not titulo:
         return False
-    
-    titulo_lower = titulo.lower()
 
-    # 1. Comprobar que estén todas las frases exactas
-    for frase in frases_exactas:
-        frase_limpia = frase.strip().lower()
-        if frase_limpia not in titulo_lower:
+    palabras_titulo = _tokenizar_palabras(titulo)
+    formas_titulo_por_posicion = [
+        _formas_singular_plural(p) for p in palabras_titulo
+    ]
+
+    for frase in consulta["frases_incluir"]:
+        if not _contiene_frase(formas_titulo_por_posicion, frase):
             return False
 
-    # 2. Comprobar que estén todas las palabras sueltas (con soporte singular/plural)
-    if palabras_sueltas:
-        formas_titulo = set()
-        tokens_titulo = re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", titulo)
-        for t in tokens_titulo:
-            formas_titulo |= _formas_singular_plural(t)
+    for frase in consulta["frases_excluir"]:
+        if _contiene_frase(formas_titulo_por_posicion, frase):
+            return False
 
-        for palabra in palabras_sueltas:
-            formas_clave = _formas_singular_plural(palabra)
-            if not (formas_clave & formas_titulo):
-                return False
+    formas_titulo_planas = set()
+    for formas in formas_titulo_por_posicion:
+        formas_titulo_planas |= formas
+
+    for palabra in consulta["palabras_excluir"]:
+        if _formas_singular_plural(palabra) & formas_titulo_planas:
+            return False
+
+    if consulta["palabras_incluir"]:
+        formas_por_palabra = [
+            _formas_singular_plural(p) for p in consulta["palabras_incluir"]
+        ]
+        if not any(formas & formas_titulo_planas for formas in formas_por_palabra):
+            return False
 
     return True
 
@@ -758,6 +864,7 @@ def aplicar_filtros_comunes(df):
 
         f_str = str(f_str).strip()
 
+        # Si no hay fecha de cierre especificada, no excluir la licitación
         if f_str.lower() in ["no especificada", "no especificado"]:
             return True
 
@@ -793,22 +900,33 @@ def aplicar_filtros_comunes(df):
             df["fecha"].apply(filtrar_fecha_pub)
         ]
 
-    # 10. Palabras clave (con soporte para comillas dobles y palabras sueltas)
+    # 10. Palabras clave (frases exactas, exclusiones y palabras sueltas
+    # con perdon de plural -- ver _analizar_consulta_palabras_clave)
     if filtro_palabras_clave.strip():
-        frases_exactas, palabras_sueltas = _analizar_palabras_clave(filtro_palabras_clave)
+        consulta_palabras_clave = _analizar_consulta_palabras_clave(
+            filtro_palabras_clave
+        )
 
-        if (frases_exactas or palabras_sueltas) and "titulo" in df.columns:
+        hay_algun_criterio = any(
+            consulta_palabras_clave[clave]
+            for clave in (
+                "frases_incluir",
+                "frases_excluir",
+                "palabras_incluir",
+                "palabras_excluir",
+            )
+        )
+
+        if hay_algun_criterio and "titulo" in df.columns:
             df = df[
                 df["titulo"].apply(
-                    lambda t: _titulo_cumple_palabras_clave(
-                        t, frases_exactas, palabras_sueltas
+                    lambda t: _titulo_cumple_consulta_palabras_clave(
+                        t, consulta_palabras_clave
                     )
                 )
             ]
 
     return df
-
-
 # 5. Lógica del Botón de Novedades
 if btn_novedades:
     with st.spinner("Buscando en novedades y actualizaciones..."):
@@ -1018,6 +1136,7 @@ elif btn_buscar:
                     })
 
                 st.session_state.df_resultados = pd.DataFrame(tabla_final)
+
 
 # --- 7. RENDERIZADO PERSISTENTE DE RESULTADOS ---
 if st.session_state.df_resultados is not None and not st.session_state.df_resultados.empty:
