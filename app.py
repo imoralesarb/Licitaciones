@@ -1,5 +1,6 @@
 from datetime import date
 import os
+import re
 import pandas as pd
 import streamlit as st
 from sentence_transformers import SentenceTransformer
@@ -319,6 +320,7 @@ st.title("🔍 Buscador inteligente de Licitaciones")
 
 def limpiar_campos():
     st.session_state.consulta_texto = ""
+    st.session_state.filtro_palabras_clave = ""
     st.session_state.filtro_fuente = []
     st.session_state.filtro_tipo_contrato = []
     st.session_state.filtro_ccaa = []
@@ -333,11 +335,28 @@ def limpiar_campos():
     st.session_state.mensaje_estado = ""
 
 
-# Buscador principal
+# Buscador principal y Palabras clave (mutuamente excluyentes: el uso de
+# uno desactiva y sombrea en gris el otro, mismo comportamiento que el
+# selector de "¿Cuántos resultados quieres ver?").
+hay_palabras_clave_activas = bool(
+    st.session_state.get("filtro_palabras_clave", "").strip()
+)
+hay_consulta_texto_activa = bool(
+    st.session_state.get("consulta_texto", "").strip()
+)
+
 consulta_texto = st.text_input(
     "¿Qué tipo de licitación buscas?",
     placeholder="ej. mantenimiento informático, suministro de vehículos, obras...",
     key="consulta_texto",
+    disabled=hay_palabras_clave_activas,
+)
+
+filtro_palabras_clave = st.text_input(
+    "Palabras clave",
+    placeholder="ej. deporte, mantenimiento, obras...",
+    key="filtro_palabras_clave",
+    disabled=hay_consulta_texto_activa,
 )
 
 # Panel de filtros avanzados
@@ -558,6 +577,63 @@ def estilizar_filas(row):
 
 
 # Función genérica para aplicar todos los filtros de Pandas en común
+def _tokenizar_palabras(texto):
+    """Extrae palabras (secuencias de letras) de un texto, ignorando comas,
+    signos de puntuacion y espacios, que es lo que separa las palabras
+    clave introducidas por el usuario."""
+    if not texto:
+        return []
+    return re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", texto)
+
+
+def _formas_singular_plural(palabra):
+    """Devuelve un conjunto con la palabra y sus variantes de singular o
+    plural mas probables en español, aplicando solo las reglas
+    habituales de formacion del plural (anadir "s", anadir "es", o
+    "z" -> "ces"). Es una heuristica basada en reglas, no un
+    lematizador: a proposito NO cubre otras variaciones como
+    "deportivo" o "deportiva", solo el plural regular de la propia
+    palabra, tal como se pidio."""
+    p = palabra.lower().strip()
+    formas = {p}
+
+    if len(p) < 4:
+        return formas
+
+    if p.endswith("z"):
+        formas.add(p[:-1] + "ces")
+    if p.endswith("ces") and len(p) > 4:
+        formas.add(p[:-3] + "z")
+
+    if p.endswith("s"):
+        formas.add(p[:-1])
+        if p.endswith("es"):
+            formas.add(p[:-2])
+    else:
+        formas.add(p + "s")
+        formas.add(p + "es")
+
+    return formas
+
+
+def _titulo_contiene_alguna_palabra_clave(titulo, formas_por_palabra_clave):
+    """formas_por_palabra_clave es una lista de conjuntos (uno por cada
+    palabra clave introducida, ya con sus variantes de singular/plural
+    precalculadas). Devuelve True si el titulo contiene, como palabra
+    exacta (salvo plural), alguna de las palabras clave."""
+    if not titulo or not formas_por_palabra_clave:
+        return False
+
+    formas_titulo = set()
+    for palabra_titulo in _tokenizar_palabras(titulo):
+        formas_titulo |= _formas_singular_plural(palabra_titulo)
+
+    return any(
+        formas_clave & formas_titulo
+        for formas_clave in formas_por_palabra_clave
+    )
+
+
 def aplicar_filtros_comunes(df):
     if df.empty:
         return df
@@ -732,6 +808,22 @@ def aplicar_filtros_comunes(df):
         df = df[
             df["fecha"].apply(filtrar_fecha_pub)
         ]
+
+    # 10. Palabras clave (coincidencia exacta en el titulo, salvo plural)
+    if filtro_palabras_clave.strip():
+        formas_por_palabra_clave = [
+            _formas_singular_plural(palabra)
+            for palabra in _tokenizar_palabras(filtro_palabras_clave)
+        ]
+
+        if formas_por_palabra_clave and "titulo" in df.columns:
+            df = df[
+                df["titulo"].apply(
+                    lambda t: _titulo_contiene_alguna_palabra_clave(
+                        t, formas_por_palabra_clave
+                    )
+                )
+            ]
 
     return df
 # 5. Lógica del Botón de Novedades
