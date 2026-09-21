@@ -360,10 +360,10 @@ filtro_palabras_clave = st.text_input(
 )
 st.caption(
     "Varias palabras seguidas equivalen a OR (basta con que aparezca una). "
-    "Usa AND para exigir varios terminos a la vez (ej. obras AND escuelas) "
-    'y OR para exigir cualquiera (ej. limpieza OR conserjeria). Las comillas '
+    "Usa AND para exigir varios terminos a la vez (ej. software AND web) "
+    'y OR para exigir cualquiera (ej. suministro OR servicio). Las comillas '
     'exigen una frase exacta (ej. "mantenimiento de equipos") y el guion '
-    'excluye un termino o frase (ej. -limpieza o -"limpieza de cristales").'
+    'excluye un termino o frase (ej. -provisional o -"obras menores").'
 )
 
 # Panel de filtros avanzados
