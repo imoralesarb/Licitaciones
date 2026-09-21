@@ -1019,15 +1019,22 @@ elif btn_buscar:
 
                 st.session_state.df_resultados = pd.DataFrame(tabla_final)
 
-# Mostrar resultados guardados en sesión si existen
+# --- 7. RENDERIZADO PERSISTENTE DE RESULTADOS ---
 if st.session_state.df_resultados is not None and not st.session_state.df_resultados.empty:
-    st.markdown("---")
-    st.markdown(f"### {st.session_state.mensaje_estado}")
-    
-    df_mostrar = st.session_state.df_resultados.drop(columns=["Es Novedad", "Es Actualizada"])
-    
+    if st.session_state.mensaje_estado:
+        st.success(st.session_state.mensaje_estado)
+
+    st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
+
     st.dataframe(
-        df_mostrar,
-        use_container_width=True,
+        st.session_state.df_resultados.style.apply(estilizar_filas, axis=1),
+        column_config={
+            "Enlace": st.column_config.LinkColumn(
+                "Enlace oficial", display_text="Ver licitación 🔗"
+            ),
+            "Es Novedad": None,
+            "Es Actualizada": None,
+        },
         hide_index=True,
+        use_container_width=True,
     )
