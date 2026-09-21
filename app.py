@@ -359,10 +359,11 @@ filtro_palabras_clave = st.text_input(
     disabled=hay_consulta_texto_activa,
 )
 st.caption(
-    "Escribe varias palabras para buscar cualquiera de ellas. Usa comillas "
-    'para exigir una frase exacta (ej. "mantenimiento de equipos") y un '
-    "guion delante de una palabra o frase para excluirla (ej. -limpieza o "
-    '-"limpieza de cristales").'
+    "Varias palabras seguidas equivalen a OR (basta con que aparezca una). "
+    "Usa AND para exigir varios terminos a la vez (ej. obras AND escuelas) "
+    'y OR para exigir cualquiera (ej. limpieza OR conserjeria). Las comillas '
+    'exigen una frase exacta (ej. "mantenimiento de equipos") y el guion '
+    'excluye un termino o frase (ej. -limpieza o -"limpieza de cristales").'
 )
 
 # Panel de filtros avanzados
@@ -623,44 +624,99 @@ def _formas_singular_plural(palabra):
 
 
 def _analizar_consulta_palabras_clave(texto):
-    """Analiza el texto del campo "Palabras clave" y separa lo que hay
-    que exigir/excluir del titulo, segun esta sintaxis:
-        "frase exacta"   -> debe aparecer, en ese orden, en el titulo
-        -"frase excluida" -> esa frase NO debe aparecer en el titulo
-        palabra           -> debe aparecer esa palabra (o su plural);
-                              si hay varias palabras sueltas, basta con
-                              que aparezca CUALQUIERA de ellas
-        -palabra           -> esa palabra (ni su plural) NO debe aparecer
-    Devuelve un diccionario con las 4 listas ya separadas."""
-    frases_incluir = []
+    """Analiza el texto del campo "Palabras clave" con esta sintaxis:
+        "frase exacta"     -> termino de tipo frase: debe aparecer, en
+                                ese orden, en el titulo
+        -"frase excluida"  -> esa frase NUNCA debe aparecer (obligatorio,
+                                al margen de cualquier AND/OR)
+        palabra             -> termino de tipo palabra: debe aparecer esa
+                                palabra (o su plural)
+        -palabra            -> esa palabra (ni su plural) NUNCA debe
+                                aparecer (obligatorio, al margen de
+                                cualquier AND/OR)
+        AND                 -> interseccion: ambos terminos deben
+                                cumplirse
+        OR                  -> union: basta con que se cumpla uno
+        (sin operador)       -> se trata igual que OR, tal como ya
+                                funcionaba (p. ej. "web software" o
+                                "web, software" siguen siendo "web
+                                OR software")
+
+    Las exclusiones (con "-") son siempre obligatorias y quedan FUERA
+    de la estructura AND/OR: funcionan como un filtro aparte que
+    siempre se aplica, igual que en la version anterior.
+
+    Los terminos positivos se agrupan en "grupos AND" separados por
+    OR (explicito o implicito): el AND liga mas fuerte que el OR,
+    igual que en cualquier buscador booleano estandar (Google,
+    Lucene...) -- "obras AND escuelas OR reformas" se entiende como
+    "(obras AND escuelas) OR reformas".
+
+    Devuelve un diccionario:
+        {
+            "grupos_incluir": [ [termino, termino, ...], ... ],
+            "frases_excluir": [ [palabra, ...], ... ],
+            "palabras_excluir": [ "palabra", ... ],
+        }
+    donde cada `grupos_incluir` es una lista de grupos (union entre
+    grupos) y cada grupo es una lista de terminos que deben cumplirse
+    TODOS (interseccion dentro del grupo); cada `termino` es
+    {"tipo": "palabra", "valor": str} o
+    {"tipo": "frase", "valor": [palabra, ...]}."""
     frases_excluir = []
+    palabras_excluir = []
+    marcadores_frase = {}
 
     def _registrar_frase(coincidencia):
         negada = coincidencia.group(1) == "-"
         palabras_frase = _tokenizar_palabras(coincidencia.group(2))
-        if palabras_frase:
-            if negada:
-                frases_excluir.append(palabras_frase)
-            else:
-                frases_incluir.append(palabras_frase)
-        return " "
+        if not palabras_frase:
+            return " "
+        if negada:
+            frases_excluir.append(palabras_frase)
+            return " "
+        marcador = f"__FRASE{len(marcadores_frase)}__"
+        marcadores_frase[marcador] = palabras_frase
+        return f" {marcador} "
 
     texto_sin_frases = re.sub(r'(-?)"([^"]*)"', _registrar_frase, texto)
 
-    palabras_incluir = []
-    palabras_excluir = []
-    for signo, palabra in re.findall(
-        r"(-?)([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+)", texto_sin_frases
+    grupos_incluir = []
+    grupo_actual = []
+    operador_pendiente = "OR"
+
+    for signo, token in re.findall(
+        r"(-?)(\bAND\b|\bOR\b|__FRASE\d+__|[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+)",
+        texto_sin_frases,
     ):
-        if signo == "-":
-            palabras_excluir.append(palabra)
+        if token in ("AND", "OR"):
+            operador_pendiente = token
+            continue
+
+        if token in marcadores_frase:
+            termino = {"tipo": "frase", "valor": marcadores_frase[token]}
+        elif signo == "-":
+            palabras_excluir.append(token)
+            continue
         else:
-            palabras_incluir.append(palabra)
+            termino = {"tipo": "palabra", "valor": token}
+
+        if not grupo_actual:
+            grupo_actual = [termino]
+        elif operador_pendiente == "AND":
+            grupo_actual.append(termino)
+        else:
+            grupos_incluir.append(grupo_actual)
+            grupo_actual = [termino]
+
+        operador_pendiente = "OR"
+
+    if grupo_actual:
+        grupos_incluir.append(grupo_actual)
 
     return {
-        "frases_incluir": frases_incluir,
+        "grupos_incluir": grupos_incluir,
         "frases_excluir": frases_excluir,
-        "palabras_incluir": palabras_incluir,
         "palabras_excluir": palabras_excluir,
     }
 
@@ -686,11 +742,21 @@ def _contiene_frase(formas_titulo_por_posicion, palabras_frase):
     return False
 
 
+def _titulo_coincide_termino(formas_titulo_por_posicion, formas_titulo_planas, termino):
+    """Evalua un unico termino (palabra o frase) contra un titulo ya
+    tokenizado."""
+    if termino["tipo"] == "frase":
+        return _contiene_frase(formas_titulo_por_posicion, termino["valor"])
+    return bool(_formas_singular_plural(termino["valor"]) & formas_titulo_planas)
+
+
 def _titulo_cumple_consulta_palabras_clave(titulo, consulta):
     """Evalua un titulo contra el resultado de
     _analizar_consulta_palabras_clave: deben cumplirse TODAS las frases
-    y palabras exigidas, NINGUNA de las frases o palabras excluidas, y
-    -si hay palabras sueltas sin comillas- al menos una de ellas."""
+    y palabras excluidas ausentes (siempre obligatorio), y ademas -si
+    hay terminos positivos- que se cumpla ALGUNO de los grupos AND de
+    "grupos_incluir" (union de intersecciones, con la precedencia
+    AND > OR ya resuelta al analizar la consulta)."""
     if not titulo:
         return False
 
@@ -698,10 +764,6 @@ def _titulo_cumple_consulta_palabras_clave(titulo, consulta):
     formas_titulo_por_posicion = [
         _formas_singular_plural(p) for p in palabras_titulo
     ]
-
-    for frase in consulta["frases_incluir"]:
-        if not _contiene_frase(formas_titulo_por_posicion, frase):
-            return False
 
     for frase in consulta["frases_excluir"]:
         if _contiene_frase(formas_titulo_por_posicion, frase):
@@ -715,11 +777,17 @@ def _titulo_cumple_consulta_palabras_clave(titulo, consulta):
         if _formas_singular_plural(palabra) & formas_titulo_planas:
             return False
 
-    if consulta["palabras_incluir"]:
-        formas_por_palabra = [
-            _formas_singular_plural(p) for p in consulta["palabras_incluir"]
-        ]
-        if not any(formas & formas_titulo_planas for formas in formas_por_palabra):
+    if consulta["grupos_incluir"]:
+        cumple_algun_grupo = any(
+            all(
+                _titulo_coincide_termino(
+                    formas_titulo_por_posicion, formas_titulo_planas, termino
+                )
+                for termino in grupo
+            )
+            for grupo in consulta["grupos_incluir"]
+        )
+        if not cumple_algun_grupo:
             return False
 
     return True
@@ -900,8 +968,8 @@ def aplicar_filtros_comunes(df):
             df["fecha"].apply(filtrar_fecha_pub)
         ]
 
-    # 10. Palabras clave (frases exactas, exclusiones y palabras sueltas
-    # con perdon de plural -- ver _analizar_consulta_palabras_clave)
+    # 10. Palabras clave (grupos AND/OR, frases exactas y exclusiones
+    # -- ver _analizar_consulta_palabras_clave)
     if filtro_palabras_clave.strip():
         consulta_palabras_clave = _analizar_consulta_palabras_clave(
             filtro_palabras_clave
@@ -910,9 +978,8 @@ def aplicar_filtros_comunes(df):
         hay_algun_criterio = any(
             consulta_palabras_clave[clave]
             for clave in (
-                "frases_incluir",
+                "grupos_incluir",
                 "frases_excluir",
-                "palabras_incluir",
                 "palabras_excluir",
             )
         )
