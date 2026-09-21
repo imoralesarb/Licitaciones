@@ -1,11 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 import os
 import re
 import pandas as pd
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from supabase import Client, create_client
-from datetime import date, timedelta
 
 # Desactivar traductor automático del navegador
 st.markdown(
@@ -335,9 +334,7 @@ def limpiar_campos():
     st.session_state.mensaje_estado = ""
 
 
-# Buscador principal y Palabras clave (mutuamente excluyentes: el uso de
-# uno desactiva y sombrea en gris el otro, mismo comportamiento que el
-# selector de "¿Cuántos resultados quieres ver?").
+# Buscador principal y Palabras clave (mutuamente excluyentes)
 hay_palabras_clave_activas = bool(
     st.session_state.get("filtro_palabras_clave", "").strip()
 )
@@ -354,9 +351,12 @@ consulta_texto = st.text_input(
 
 filtro_palabras_clave = st.text_input(
     "Palabras clave",
-    placeholder="ej. mantenimiento, obras...",
+    placeholder="ej. mantenimiento, \"soporte técnico\", obras...",
     key="filtro_palabras_clave",
     disabled=hay_consulta_texto_activa,
+)
+st.caption(
+    "💡 **Consejo de búsqueda:** Puedes introducir palabras sueltas o frases completas **entre comillas dobles** (ej. `\"soporte técnico\"`) para buscar términos exactos y seguidos en el título."
 )
 
 # Panel de filtros avanzados
@@ -436,7 +436,6 @@ with col_cpv:
         key="filtro_cpv_codigo"
     )
 
-# Fila inferior con fecha fin y rango de publicación alineados en el mismo renglón
 # Fila de fechas
 col_fecha_fin, col_rango = st.columns([1, 2])
 
@@ -448,8 +447,6 @@ with col_fecha_fin:
     )
 
 with col_rango:
-    # st.markdown("📅 Rango publicación:")
-
     col_desde, col_hasta = st.columns(2)
 
     with col_desde:
@@ -465,18 +462,6 @@ with col_rango:
             value=date(2100, 12, 31),
             key="f_fin"
         )
-        
-# col_f_lbl, col_r_lbl, col_r1, col_r2 = st.columns([1.5, 1.2, 2, 2])
-# with col_f_lbl:
-#    fecha_cierre_tope = st.date_input(
-#        "⏳ Fecha fin de presentación (Mínima)", value=date(2026, 3, 1), key="fecha_cierre_tope"
-#    )
-#with col_r_lbl:
-#    st.markdown('<div class="alignment-fix">📅 Rango publicación:</div>', unsafe_allow_html=True)
-#with col_r1:
-#    f_inicio = st.date_input("Desde", value=date(2026, 1, 1), key="f_inicio", label_visibility="collapsed")
-#with col_r2:
-#    f_fin = st.date_input("Hasta", value=date(2026, 12, 31), key="f_fin", label_visibility="collapsed")
 
 
 col_resultados, col_vacio = st.columns([60, 40])
@@ -489,21 +474,16 @@ with col_resultados:
             unsafe_allow_html=True
         )
 
-        # Inicializar estados si no existen
         if "mostrar_todos" not in st.session_state:
             st.session_state.mostrar_todos = True
         if "limite_resultados" not in st.session_state:
             st.session_state.limite_resultados = 10
 
-        # Callback para cuando se mueve el slider
         def actualizar_slider():
-            # Si se interactúa con el slider, desmarcamos el checkbox
             st.session_state.mostrar_todos = False
 
-        # Callback para cuando se marca el checkbox
         def actualizar_checkbox():
             if st.session_state.mostrar_todos:
-                # Opcional: podrías resetear el slider si vuelve a marcar "Mostrar todos"
                 pass
 
         col_res_chk, col_res_texto, col_res_slider = st.columns([2.5, 2, 4])
@@ -515,7 +495,6 @@ with col_resultados:
                 on_change=actualizar_checkbox
             )
 
-        # Definimos el color gris si "mostrar_todos" está activo
         color_texto = "gray" if mostrar_todos else "inherit"
 
         with col_res_texto:
@@ -533,10 +512,9 @@ with col_resultados:
                 max_value=500,
                 key="limite_resultados",
                 label_visibility="collapsed",
-                disabled=mostrar_todos, # Esto desactiva y pone gris la barra nativamente
+                disabled=mostrar_todos, 
                 on_change=actualizar_slider
             )
-
 
 
 # --- BOTONES DE ACCIÓN PRINCIPAL ---
@@ -576,24 +554,21 @@ def estilizar_filas(row):
     return [""] * len(row)
 
 
-# Función genérica para aplicar todos los filtros de Pandas en común
-def _tokenizar_palabras(texto):
-    """Extrae palabras (secuencias de letras) de un texto, ignorando comas,
-    signos de puntuacion y espacios, que es lo que separa las palabras
-    clave introducidas por el usuario."""
-    if not texto:
-        return []
-    return re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", texto)
+# --- FUNCIONES DE SOPORTE PARA PALABRAS CLAVE CON COMILLAS Y REGEX ---
+def _analizar_palabras_clave(texto_filtro):
+    """Extrae frases exactas entre comillas dobles y palabras sueltas."""
+    if not texto_filtro:
+        return [], []
+
+    frases_exactas = re.findall(r'"([^"]+)"', texto_filtro)
+    resto_texto = re.sub(r'"[^"]+"', '', texto_filtro)
+    palabras_sueltas = re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", resto_texto)
+    
+    return frases_exactas, palabras_sueltas
 
 
 def _formas_singular_plural(palabra):
-    """Devuelve un conjunto con la palabra y sus variantes de singular o
-    plural mas probables en español, aplicando solo las reglas
-    habituales de formacion del plural (anadir "s", anadir "es", o
-    "z" -> "ces"). Es una heuristica basada en reglas, no un
-    lematizador: a proposito NO cubre otras variaciones como
-    "deportivo" o "deportiva", solo el plural regular de la propia
-    palabra, tal como se pidio."""
+    """Genera variantes de singular y plural de forma heurística."""
     p = palabra.lower().strip()
     formas = {p}
 
@@ -616,22 +591,32 @@ def _formas_singular_plural(palabra):
     return formas
 
 
-def _titulo_contiene_alguna_palabra_clave(titulo, formas_por_palabra_clave):
-    """formas_por_palabra_clave es una lista de conjuntos (uno por cada
-    palabra clave introducida, ya con sus variantes de singular/plural
-    precalculadas). Devuelve True si el titulo contiene, como palabra
-    exacta (salvo plural), alguna de las palabras clave."""
-    if not titulo or not formas_por_palabra_clave:
+def _titulo_cumple_palabras_clave(titulo, frases_exactas, palabras_sueltas):
+    """Comprueba si el título contiene frases exactas y palabras sueltas."""
+    if not titulo:
         return False
+    
+    titulo_lower = titulo.lower()
 
-    formas_titulo = set()
-    for palabra_titulo in _tokenizar_palabras(titulo):
-        formas_titulo |= _formas_singular_plural(palabra_titulo)
+    # 1. Comprobar que estén todas las frases exactas
+    for frase in frases_exactas:
+        frase_limpia = frase.strip().lower()
+        if frase_limpia not in titulo_lower:
+            return False
 
-    return any(
-        formas_clave & formas_titulo
-        for formas_clave in formas_por_palabra_clave
-    )
+    # 2. Comprobar que estén todas las palabras sueltas (con soporte singular/plural)
+    if palabras_sueltas:
+        formas_titulo = set()
+        tokens_titulo = re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+", titulo)
+        for t in tokens_titulo:
+            formas_titulo |= _formas_singular_plural(t)
+
+        for palabra in palabras_sueltas:
+            formas_clave = _formas_singular_plural(palabra)
+            if not (formas_clave & formas_titulo):
+                return False
+
+    return True
 
 
 def aplicar_filtros_comunes(df):
@@ -773,7 +758,6 @@ def aplicar_filtros_comunes(df):
 
         f_str = str(f_str).strip()
 
-        # Si no hay fecha de cierre especificada, no excluir la licitación
         if f_str.lower() in ["no especificada", "no especificado"]:
             return True
 
@@ -809,23 +793,22 @@ def aplicar_filtros_comunes(df):
             df["fecha"].apply(filtrar_fecha_pub)
         ]
 
-    # 10. Palabras clave (coincidencia exacta en el titulo, salvo plural)
+    # 10. Palabras clave (con soporte para comillas dobles y palabras sueltas)
     if filtro_palabras_clave.strip():
-        formas_por_palabra_clave = [
-            _formas_singular_plural(palabra)
-            for palabra in _tokenizar_palabras(filtro_palabras_clave)
-        ]
+        frases_exactas, palabras_sueltas = _analizar_palabras_clave(filtro_palabras_clave)
 
-        if formas_por_palabra_clave and "titulo" in df.columns:
+        if (frases_exactas or palabras_sueltas) and "titulo" in df.columns:
             df = df[
                 df["titulo"].apply(
-                    lambda t: _titulo_contiene_alguna_palabra_clave(
-                        t, formas_por_palabra_clave
+                    lambda t: _titulo_cumple_palabras_clave(
+                        t, frases_exactas, palabras_sueltas
                     )
                 )
             ]
 
     return df
+
+
 # 5. Lógica del Botón de Novedades
 if btn_novedades:
     with st.spinner("Buscando en novedades y actualizaciones..."):
@@ -1036,23 +1019,15 @@ elif btn_buscar:
 
                 st.session_state.df_resultados = pd.DataFrame(tabla_final)
 
-
-# --- 7. RENDERIZADO PERSISTENTE DE RESULTADOS ---
+# Mostrar resultados guardados en sesión si existen
 if st.session_state.df_resultados is not None and not st.session_state.df_resultados.empty:
-    if st.session_state.mensaje_estado:
-        st.success(st.session_state.mensaje_estado)
-
-    st.markdown("🟢 *Verde*: Licitaciones Nuevas | 🔵 *Azul*: Licitaciones Actualizadas")
-
+    st.markdown("---")
+    st.markdown(f"### {st.session_state.mensaje_estado}")
+    
+    df_mostrar = st.session_state.df_resultados.drop(columns=["Es Novedad", "Es Actualizada"])
+    
     st.dataframe(
-        st.session_state.df_resultados.style.apply(estilizar_filas, axis=1),
-        column_config={
-            "Enlace": st.column_config.LinkColumn(
-                "Enlace oficial", display_text="Ver licitación 🔗"
-            ),
-            "Es Novedad": None,
-            "Es Actualizada": None,
-        },
-        hide_index=True,
+        df_mostrar,
         use_container_width=True,
+        hide_index=True,
     )
