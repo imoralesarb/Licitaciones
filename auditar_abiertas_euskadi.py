@@ -649,4 +649,3 @@ def auditar_licitaciones_html_euskadi():
 if __name__ == "__main__":
 
     auditar_licitaciones_html_euskadi()
-```
